@@ -1,35 +1,44 @@
 "use client"
 
-import { useEffect, useRef, useState } from "react"
-import { RefreshCw, ExternalLink, Smartphone, Tablet, Monitor } from "lucide-react"
+import React, { useEffect, useRef, useState } from "react"
+import {
+  RefreshCw,
+  ExternalLink,
+  Smartphone,
+  Tablet,
+  Laptop,
+  Monitor,
+  RotateCcw,
+  ZoomIn,
+  ZoomOut,
+  Maximize2
+} from "lucide-react"
 import { Button } from "@/components/ui/button"
 import type { FileNode } from "@/types/file-system"
-
-interface Library {
-  name: string
-  url: string
-  type: "css" | "js"
-  description: string
-}
+import type { Library } from "@/lib/export-project"
 
 interface PreviewPanelProps {
   files: FileNode[]
-  onConsoleLog?: (message: string, type: "log" | "error" | "warn") => void
+  onConsoleLog?: (message: string, type: "log" | "error" | "warn" | "info") => void
   externalLibraries?: Library[]
 }
 
-type ViewportSize = "mobile" | "tablet" | "desktop"
+type ViewportPreset = "desktop" | "laptop" | "tablet" | "mobile"
 
 export function PreviewPanel({ files, onConsoleLog, externalLibraries = [] }: PreviewPanelProps) {
   const iframeRef = useRef<HTMLIFrameElement>(null)
-  const [previewUrl, setPreviewUrl] = useState("")
-  const [viewport, setViewport] = useState<ViewportSize>("desktop")
+  const [previewUrl, setPreviewUrl] = useState<string>("")
+  const [viewport, setViewport] = useState<ViewportPreset>("desktop")
+  const [isLandscape, setIsLandscape] = useState<boolean>(false)
+  const [zoomScale, setZoomScale] = useState<number>(100)
+  const [isReloading, setIsReloading] = useState<boolean>(false)
+
   const previousContentRef = useRef<string>(JSON.stringify(externalLibraries))
   const previousFilesRef = useRef<Map<string, string>>(new Map())
-  const isInitialLoadRef = useRef(true)
+  const isInitialLoadRef = useRef<boolean>(true)
   const hotReloadTimeoutRef = useRef<NodeJS.Timeout | null>(null)
 
-  // Cleanup blob URLs and timeouts on unmount
+  // Cleanup blob URLs on unmount
   useEffect(() => {
     return () => {
       if (previewUrl) {
@@ -46,7 +55,6 @@ export function PreviewPanel({ files, onConsoleLog, externalLibraries = [] }: Pr
     if (!onConsoleLog) return
 
     const handleMessage = (event: MessageEvent) => {
-      // Validate message origin and structure
       if (event.data && event.data.type === "console") {
         const { method, args } = event.data
         if (method && args && Array.isArray(args)) {
@@ -63,7 +71,7 @@ export function PreviewPanel({ files, onConsoleLog, externalLibraries = [] }: Pr
             })
             .join(" ")
 
-          onConsoleLog(message, method as "log" | "error" | "warn")
+          onConsoleLog(message, method as "log" | "error" | "warn" | "info")
         }
       }
     }
@@ -72,146 +80,115 @@ export function PreviewPanel({ files, onConsoleLog, externalLibraries = [] }: Pr
     return () => window.removeEventListener("message", handleMessage)
   }, [onConsoleLog])
 
+  // React to file changes
   useEffect(() => {
-    // Only update preview when file content changes, not when files are just selected
-    const relevantFiles = files.filter(file => 
-      file.type === 'file' && 
-      (file.path.endsWith('.html') || file.path.endsWith('.htm') || 
-       file.path.endsWith('.css') || file.path.endsWith('.js'))
+    const relevantFiles = files.filter(
+      (file) =>
+        file.type === "file" &&
+        (file.path.endsWith(".html") ||
+          file.path.endsWith(".htm") ||
+          file.path.endsWith(".css") ||
+          file.path.endsWith(".js") ||
+          file.path.endsWith(".ts") ||
+          file.path.endsWith(".jsx") ||
+          file.path.endsWith(".tsx"))
     )
-    
-    // Detect which files changed
-    const changedFiles: { path: string; content: string; type: 'html' | 'css' | 'js' }[] = []
+
+    const changedFiles: { path: string; content: string; type: "html" | "css" | "js" }[] = []
     const currentFilesMap = new Map<string, string>()
-    
-    relevantFiles.forEach(file => {
+
+    relevantFiles.forEach((file) => {
       if (file.content !== undefined) {
         currentFilesMap.set(file.path, file.content)
         const previousContent = previousFilesRef.current.get(file.path)
-        
+
         if (previousContent !== file.content) {
-          let fileType: 'html' | 'css' | 'js' = 'html'
-          if (file.path.endsWith('.css')) fileType = 'css'
-          else if (file.path.endsWith('.js')) fileType = 'js'
-          
+          let fileType: "html" | "css" | "js" = "html"
+          if (file.path.endsWith(".css")) fileType = "css"
+          else if (file.path.endsWith(".js") || file.path.endsWith(".ts") || file.path.endsWith(".jsx") || file.path.endsWith(".tsx")) {
+            fileType = "js"
+          }
+
           changedFiles.push({ path: file.path, content: file.content, type: fileType })
         }
       }
     })
-    
-    // Update the reference
+
     previousFilesRef.current = currentFilesMap
-    
-    // Check if external libraries changed
+
     const currentLibsContent = JSON.stringify(externalLibraries)
     const libsChanged = currentLibsContent !== previousContentRef.current
-    
-    // If it's the initial load or libraries changed, do full reload
+
     if (isInitialLoadRef.current || libsChanged) {
       previousContentRef.current = currentLibsContent
       isInitialLoadRef.current = false
-      
-      // Clear any pending hot reload
       if (hotReloadTimeoutRef.current) {
         clearTimeout(hotReloadTimeoutRef.current)
         hotReloadTimeoutRef.current = null
       }
-      
-      updatePreview(true) // Full reload
+      updatePreview(true)
     } else if (changedFiles.length > 0) {
-      // CSS, JS, or HTML changed - do hot reload with debounce
       if (hotReloadTimeoutRef.current) {
         clearTimeout(hotReloadTimeoutRef.current)
       }
-      
       hotReloadTimeoutRef.current = setTimeout(() => {
         hotReloadChanges(changedFiles)
         hotReloadTimeoutRef.current = null
-      }, 150) // 150ms debounce for smooth typing with faster feedback
+      }, 150)
     }
   }, [files, externalLibraries])
 
-  const hotReloadChanges = (changedFiles: { path: string; content: string; type: 'html' | 'css' | 'js' }[]) => {
+  const hotReloadChanges = (changedFiles: { path: string; content: string; type: "html" | "css" | "js" }[]) => {
     if (!iframeRef.current?.contentWindow) return
 
     try {
-      // Collect assets for replacement
-      const assetMap = new Map<string, string>()
-      const collectAssets = (nodes: FileNode[]) => {
-        nodes.forEach((node) => {
-          if (node.type === "file" && node.content !== undefined) {
-            const isAsset = node.path.startsWith("/assets/") || 
-                           (node.content && (
-                             node.content.startsWith("data:image/") ||
-                             node.content.startsWith("data:application/") ||
-                             node.content.startsWith("data:text/")
-                           ))
-            if (isAsset) {
-              assetMap.set(node.path, node.content)
-            }
-          }
-          if (node.type === "folder" && node.children) {
-            collectAssets(node.children)
-          }
-        })
-      }
-      collectAssets(files)
-      
-      changedFiles.forEach(file => {
+      changedFiles.forEach((file) => {
         const fileName = file.path.split("/").pop() || file.path
         let content = file.content
-        
-        // Replace asset references in HTML and CSS
-        if (file.type === 'html' || file.type === 'css') {
-          assetMap.forEach((dataUrl, path) => {
-            // Replace in img src attributes
-            const imgRegex = new RegExp(`<img([^>]*?)src=["']${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']`, 'gi')
-            content = content.replace(imgRegex, `<img$1src="${dataUrl}"`)
-            
-            // Replace in CSS url() references
-            const cssUrlRegex = new RegExp(`url\\(['"]?${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]?\\)`, 'gi')
-            content = content.replace(cssUrlRegex, `url('${dataUrl}')`)
-          })
-        }
-        
-        if (file.type === 'css') {
-          // Update CSS without reload
-          iframeRef.current!.contentWindow!.postMessage({
-            type: 'hot-reload-css',
-            fileName,
-            content
-          }, '*')
-        } else if (file.type === 'js') {
-          // Update JS without reload
-          iframeRef.current!.contentWindow!.postMessage({
-            type: 'hot-reload-js',
-            fileName,
-            content
-          }, '*')
-        } else if (file.type === 'html') {
-          // Update HTML body content without full reload
-          iframeRef.current!.contentWindow!.postMessage({
-            type: 'hot-reload-html',
-            fileName,
-            content
-          }, '*')
+
+        if (file.type === "css") {
+          iframeRef.current!.contentWindow!.postMessage(
+            {
+              type: "hot-reload-css",
+              fileName,
+              content,
+            },
+            "*"
+          )
+        } else if (file.type === "js") {
+          iframeRef.current!.contentWindow!.postMessage(
+            {
+              type: "hot-reload-js",
+              fileName,
+              content,
+            },
+            "*"
+          )
+        } else if (file.type === "html") {
+          iframeRef.current!.contentWindow!.postMessage(
+            {
+              type: "hot-reload-html",
+              fileName,
+              content,
+            },
+            "*"
+          )
         }
       })
-    } catch (error) {
-      // Fallback to full reload on error
+    } catch {
       updatePreview(true)
     }
   }
 
   const updatePreview = (fullReload: boolean = false) => {
     if (!iframeRef.current) return
+    setIsReloading(true)
 
     try {
       const htmlContent = generateHTMLPreview(files, externalLibraries)
-      const blob = new Blob([htmlContent], { type: "text/html" })
+      const blob = new Blob([htmlContent], { type: "text/html;charset=utf-8" })
       const url = URL.createObjectURL(blob)
 
-      // Revoke previous URL to prevent memory leak
       if (previewUrl) {
         URL.revokeObjectURL(previewUrl)
       }
@@ -220,6 +197,8 @@ export function PreviewPanel({ files, onConsoleLog, externalLibraries = [] }: Pr
       iframeRef.current.src = url
     } catch (error) {
       onConsoleLog?.(`Preview Error: ${error instanceof Error ? error.message : "Unknown error"}`, "error")
+    } finally {
+      setTimeout(() => setIsReloading(false), 300)
     }
   }
 
@@ -236,110 +215,163 @@ export function PreviewPanel({ files, onConsoleLog, externalLibraries = [] }: Pr
     window.open(previewUrl, "_blank")
   }
 
-  const getViewportClass = () => {
-    switch (viewport) {
-      case "mobile":
-        return "max-w-[375px] mx-auto"
-      case "tablet":
-        return "max-w-[768px] mx-auto"
-      default:
-        return "w-full"
-    }
-  }
+  const getViewportStyles = () => {
+    if (viewport === "desktop") return { width: "100%", height: "100%" }
 
-  const getViewportLabel = () => {
-    switch (viewport) {
-      case "mobile":
-        return "375px"
-      case "tablet":
-        return "768px"
-      default:
-        return "100%"
+    let w = 375
+    let h = 667
+
+    if (viewport === "mobile") {
+      w = isLandscape ? 667 : 375
+      h = isLandscape ? 375 : 667
+    } else if (viewport === "tablet") {
+      w = isLandscape ? 1024 : 768
+      h = isLandscape ? 768 : 1024
+    } else if (viewport === "laptop") {
+      w = isLandscape ? 1280 : 1024
+      h = isLandscape ? 800 : 768
+    }
+
+    return {
+      width: `${w}px`,
+      height: `${h}px`,
+      maxHeight: "96%",
     }
   }
 
   return (
-    <div className="h-full flex flex-col bg-[#1e1e1e]">
-      <div className="flex items-center justify-between px-4 py-2 bg-[#252526] border-b border-[#2d2d2d]">
-        <div className="flex items-center gap-3">
-          <span className="text-sm text-[#cccccc] font-semibold">Preview</span>
+    <div className="h-full flex flex-col bg-[#09090b] overflow-hidden">
+      {/* Preview Header Bar */}
+      <div className="flex-none h-10 px-3 bg-[#121215] border-b border-white/[0.08] flex items-center justify-between gap-2 select-none z-10">
+        {/* Left: Viewport Switchers */}
+        <div className="flex items-center gap-1">
+          <div className="flex items-center gap-0.5 bg-[#18181b] p-0.5 rounded-lg border border-white/[0.08]">
+            <button
+              onClick={() => setViewport("desktop")}
+              className={`p-1.5 rounded-md transition-colors ${
+                viewport === "desktop"
+                  ? "bg-indigo-600/30 text-indigo-300 border border-indigo-500/30"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+              title="Desktop View (100%)"
+            >
+              <Monitor className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => setViewport("laptop")}
+              className={`p-1.5 rounded-md transition-colors ${
+                viewport === "laptop"
+                  ? "bg-indigo-600/30 text-indigo-300 border border-indigo-500/30"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+              title="Laptop View (1024px)"
+            >
+              <Laptop className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => setViewport("tablet")}
+              className={`p-1.5 rounded-md transition-colors ${
+                viewport === "tablet"
+                  ? "bg-indigo-600/30 text-indigo-300 border border-indigo-500/30"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+              title="Tablet View (768px)"
+            >
+              <Tablet className="h-3.5 w-3.5" />
+            </button>
+            <button
+              onClick={() => setViewport("mobile")}
+              className={`p-1.5 rounded-md transition-colors ${
+                viewport === "mobile"
+                  ? "bg-indigo-600/30 text-indigo-300 border border-indigo-500/30"
+                  : "text-zinc-400 hover:text-zinc-200"
+              }`}
+              title="Mobile View (375px)"
+            >
+              <Smartphone className="h-3.5 w-3.5" />
+            </button>
+          </div>
+
           {viewport !== "desktop" && (
-            <span className="text-xs text-[#858585] bg-[#1e1e1e] px-2 py-1 rounded">
-              {getViewportLabel()}
-            </span>
+            <button
+              onClick={() => setIsLandscape(!isLandscape)}
+              className={`p-1.5 rounded-lg border border-white/[0.08] text-xs transition-colors ${
+                isLandscape ? "bg-indigo-600/20 text-indigo-300" : "text-zinc-400 hover:text-zinc-200"
+              }`}
+              title="Toggle Portrait / Landscape"
+            >
+              <RotateCcw className="h-3.5 w-3.5" />
+            </button>
           )}
         </div>
-        <div className="flex items-center gap-2">
-          <div className="flex items-center gap-0.5 bg-[#1e1e1e] rounded p-0.5">
-            <Button
-              variant="ghost"
-              size="icon"
-              className={`h-7 w-7 hover:bg-[#2d2d2d] cursor-pointer transition-all ${
-                viewport === "mobile" 
-                  ? "bg-[#0e639c] text-white hover:bg-[#1177bb]" 
-                  : "text-[#cccccc] hover:text-white"
-              }`}
-              onClick={() => setViewport("mobile")}
-              title="Mobile view (375px)"
+
+        {/* Center: Fake Browser URL Pill */}
+        <div className="hidden sm:flex items-center gap-2 px-3 py-1 rounded-md bg-[#18181b] border border-white/[0.08] text-[11px] text-zinc-400 flex-1 max-w-xs truncate">
+          <span className="h-2 w-2 rounded-full bg-emerald-400" />
+          <span className="truncate font-mono">localhost:3000/sandbox</span>
+        </div>
+
+        {/* Right: Zoom & Actions */}
+        <div className="flex items-center gap-1.5">
+          <div className="flex items-center gap-0.5 bg-[#18181b] p-0.5 rounded-lg border border-white/[0.08] hidden md:flex">
+            <button
+              onClick={() => setZoomScale(Math.max(50, zoomScale - 10))}
+              className="p-1 text-zinc-400 hover:text-white"
+              title="Zoom Out"
             >
-              <Smartphone className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={`h-7 w-7 hover:bg-[#2d2d2d] cursor-pointer transition-all ${
-                viewport === "tablet" 
-                  ? "bg-[#0e639c] text-white hover:bg-[#1177bb]" 
-                  : "text-[#cccccc] hover:text-white"
-              }`}
-              onClick={() => setViewport("tablet")}
-              title="Tablet view (768px)"
+              <ZoomOut className="h-3 w-3" />
+            </button>
+            <span className="text-[10px] font-mono text-zinc-400 px-1">{zoomScale}%</span>
+            <button
+              onClick={() => setZoomScale(Math.min(150, zoomScale + 10))}
+              className="p-1 text-zinc-400 hover:text-white"
+              title="Zoom In"
             >
-              <Tablet className="h-4 w-4" />
-            </Button>
-            <Button
-              variant="ghost"
-              size="icon"
-              className={`h-7 w-7 hover:bg-[#2d2d2d] cursor-pointer transition-all ${
-                viewport === "desktop" 
-                  ? "bg-[#0e639c] text-white hover:bg-[#1177bb]" 
-                  : "text-[#cccccc] hover:text-white"
-              }`}
-              onClick={() => setViewport("desktop")}
-              title="Desktop view (100%)"
-            >
-              <Monitor className="h-4 w-4" />
-            </Button>
+              <ZoomIn className="h-3 w-3" />
+            </button>
           </div>
-          <div className="h-5 w-px bg-[#2d2d2d]" />
+
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 hover:bg-[#2d2d2d] text-[#cccccc] cursor-pointer hover:text-white transition-colors"
             onClick={handleRefresh}
-            title="Refresh preview"
+            className={`h-7 w-7 text-zinc-400 hover:text-white hover:bg-white/[0.08] ${isReloading ? "animate-spin text-indigo-400" : ""}`}
+            title="Reload Sandbox"
           >
-            <RefreshCw className="h-4 w-4" />
+            <RefreshCw className="h-3.5 w-3.5" />
           </Button>
+
           <Button
             variant="ghost"
             size="icon"
-            className="h-7 w-7 hover:bg-[#2d2d2d] text-[#cccccc] cursor-pointer hover:text-white transition-colors"
             onClick={handleOpenInNewTab}
-            title="Open in new tab"
+            className="h-7 w-7 text-zinc-400 hover:text-white hover:bg-white/[0.08]"
+            title="Open Live Preview in New Window"
           >
-            <ExternalLink className="h-4 w-4" />
+            <ExternalLink className="h-3.5 w-3.5" />
           </Button>
         </div>
       </div>
 
-      <div className="flex-1 bg-white relative overflow-auto">
-        <div className={`h-full ${getViewportClass()} transition-all duration-300 ${viewport !== "desktop" ? "shadow-xl" : ""}`}>
+      {/* Frame Container */}
+      <div className="flex-1 bg-[#09090b] relative flex items-center justify-center p-2 overflow-auto">
+        <div
+          style={{
+            ...getViewportStyles(),
+            transform: zoomScale !== 100 ? `scale(${zoomScale / 100})` : undefined,
+            transformOrigin: "center center",
+          }}
+          className={`transition-all duration-200 bg-white relative ${
+            viewport !== "desktop"
+              ? "rounded-2xl shadow-2xl border-4 border-zinc-800 ring-1 ring-white/10 overflow-hidden"
+              : "w-full h-full"
+          }`}
+        >
           <iframe
             ref={iframeRef}
-            className="w-full h-full border-0"
-            sandbox="allow-scripts allow-modals allow-forms allow-popups allow-same-origin"
-            title="Preview"
+            className="w-full h-full border-0 bg-white"
+            sandbox="allow-scripts allow-modals allow-forms allow-popups allow-same-origin allow-downloads"
+            title="Live Preview Sandbox"
           />
         </div>
       </div>
@@ -351,44 +383,23 @@ function generateHTMLPreview(files: FileNode[], externalLibraries: Library[]): s
   const fileMap = new Map<string, string>()
   const assetMap = new Map<string, string>()
 
-  const collectFiles = (nodes: FileNode[]) => {
+  const collect = (nodes: FileNode[]) => {
     nodes.forEach((node) => {
       if (node.type === "file" && node.content !== undefined) {
         fileMap.set(node.path, node.content)
-        
-        // Collect assets (images and other binary files stored as data URLs)
-        const isAsset = node.path.startsWith("/assets/") || 
-                       (node.content && (
-                         node.content.startsWith("data:image/") ||
-                         node.content.startsWith("data:application/") ||
-                         node.content.startsWith("data:text/")
-                       ))
-        
-        if (isAsset) {
+        if (node.path.startsWith("/assets/") || node.content.startsWith("data:")) {
           assetMap.set(node.path, node.content)
         }
       }
       if (node.type === "folder" && node.children) {
-        collectFiles(node.children)
+        collect(node.children)
       }
     })
   }
+  collect(files)
 
-  collectFiles(files)
-
-  // Find HTML file - prioritize index.html but accept any .html file
-  let htmlContent = ""
-  const htmlPaths = ["/index.html", "/public/index.html", "/src/index.html"]
-  
-  // First try common paths
-  for (const path of htmlPaths) {
-    if (fileMap.has(path)) {
-      htmlContent = fileMap.get(path) || ""
-      break
-    }
-  }
-  
-  // If not found, look for any .html or .htm file
+  // Find HTML
+  let htmlContent = fileMap.get("/index.html") || fileMap.get("index.html") || ""
   if (!htmlContent) {
     for (const [path, content] of fileMap.entries()) {
       if (path.endsWith(".html") || path.endsWith(".htm")) {
@@ -398,41 +409,11 @@ function generateHTMLPreview(files: FileNode[], externalLibraries: Library[]): s
     }
   }
 
-  // If still no HTML found, create a basic template
   if (!htmlContent) {
-    htmlContent = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Preview</title>
-</head>
-<body>
-  <h1>No HTML file found</h1>
-  <p>Create an index.html file to see your preview.</p>
-</body>
-</html>`
-  }
-  
-  // Validate that we have actual HTML content, not CSS or JS
-  const trimmedContent = htmlContent.trim()
-  const looksLikeHTML = trimmedContent.includes("<html") || trimmedContent.includes("<!DOCTYPE") || trimmedContent.includes("<body") || trimmedContent.includes("<head")
-  
-  if (!looksLikeHTML) {
-    // Content doesn't look like HTML, wrap it
-    htmlContent = `<!DOCTYPE html>
-<html lang="en">
-<head>
-  <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Preview</title>
-</head>
-<body>
-  ${htmlContent}
-</body>
-</html>`
+    htmlContent = `<!DOCTYPE html><html><head><meta charset="UTF-8"><title>Preview</title></head><body style="background:#09090b;color:#f4f4f5;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;"><h2>No HTML file found</h2></body></html>`
   }
 
+  // Format external libraries
   let externalLibsHTML = ""
   externalLibraries.forEach((lib) => {
     if (lib.type === "css") {
@@ -442,324 +423,150 @@ function generateHTMLPreview(files: FileNode[], externalLibraries: Library[]): s
     }
   })
 
-  // Ensure HTML has proper structure
-  if (!htmlContent.includes("</head>")) {
-    // Add head tag if missing
-    if (htmlContent.includes("<head>")) {
-      htmlContent = htmlContent.replace("<head>", "<head>\n</head>")
-    } else if (htmlContent.includes("<html>")) {
-      htmlContent = htmlContent.replace("<html>", "<html>\n<head>\n</head>")
-    } else {
-      htmlContent = `<!DOCTYPE html>\n<html>\n<head>\n</head>\n<body>\n${htmlContent}\n</body>\n</html>`
-    }
+  // Head and body structuring
+  if (!htmlContent.includes("<head>")) {
+    htmlContent = `<head>\n<meta charset="UTF-8">\n<meta name="viewport" content="width=device-width, initial-scale=1.0">\n</head>\n` + htmlContent
   }
-
-  if (!htmlContent.includes("</body>")) {
-    // Add body tag if missing
-    if (htmlContent.includes("<body>")) {
-      htmlContent = htmlContent.replace("<body>", "<body>\n</body>")
-    } else if (htmlContent.includes("</head>")) {
-      htmlContent = htmlContent.replace("</head>", "</head>\n<body>\n</body>")
-    } else {
-      htmlContent = `${htmlContent}\n<body>\n</body>`
-    }
-  }
-
   if (externalLibsHTML) {
-    htmlContent = htmlContent.replace("</head>", `${externalLibsHTML}</head>`)
+    htmlContent = htmlContent.replace("</head>", `${externalLibsHTML}\n</head>`)
   }
 
-  // Process and inject CSS files
-  const cssFiles = Array.from(fileMap.entries()).filter(
-    ([path]) => path.endsWith(".css") && !path.includes("node_modules"),
-  )
-
+  // Inject CSS
+  const cssFiles = Array.from(fileMap.entries()).filter(([path]) => path.endsWith(".css"))
   cssFiles.forEach(([path, content]) => {
-    const fileName = path.split("/").pop()
-    if (!fileName) return
-    
-    // Skip if content is empty
-    if (!content || !content.trim()) return
-    
-    // Escape special regex characters in filename
-    const escapedFileName = fileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const linkRegex = new RegExp(`<link[^>]*href=["'](?:\\.?\\/)?${escapedFileName}["'][^>]*>`, "gi")
-    
-    // Check if this CSS file is referenced in the HTML
-    const isReferenced = htmlContent.match(linkRegex)
-    
-    if (isReferenced) {
-      // Replace the link tag with inline style
+    const fileName = path.split("/").pop() || ""
+    if (!content.trim()) return
+    const linkRegex = new RegExp(`<link[^>]*href=["'](?:\\.?\\/)?${fileName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'][^>]*>`, "gi")
+    if (htmlContent.match(linkRegex)) {
       htmlContent = htmlContent.replace(linkRegex, `<style data-file="${fileName}">\n${content}\n</style>`)
-    } else if (!htmlContent.includes(content)) {
-      // Inject CSS even if not referenced (auto-include all CSS files)
+    } else {
       htmlContent = htmlContent.replace("</head>", `<style data-file="${fileName}">\n${content}\n</style>\n</head>`)
     }
   })
 
-  // Process and inject JS files
-  const jsFiles = Array.from(fileMap.entries()).filter(
-    ([path]) => path.endsWith(".js") && !path.includes("node_modules"),
-  )
-
+  // Inject JS
+  const jsFiles = Array.from(fileMap.entries()).filter(([path]) => path.endsWith(".js") || path.endsWith(".ts"))
   jsFiles.forEach(([path, content]) => {
-    const fileName = path.split("/").pop()
-    if (!fileName) return
-    
-    // Skip if content is empty
-    if (!content || !content.trim()) return
-    
-    // Escape special regex characters in filename
-    const escapedFileName = fileName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-    const scriptRegex = new RegExp(`<script[^>]*src=["'](?:\\.?\\/)?${escapedFileName}["'][^>]*></script>`, "gi")
-    
-    // Check if this JS file is referenced in the HTML
-    const isReferenced = htmlContent.match(scriptRegex)
-    
-    if (isReferenced) {
-      // Replace the script tag with inline script
+    const fileName = path.split("/").pop() || ""
+    if (!content.trim()) return
+    const scriptRegex = new RegExp(`<script[^>]*src=["'](?:\\.?\\/)?${fileName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'][^>]*></script>`, "gi")
+    if (htmlContent.match(scriptRegex)) {
       htmlContent = htmlContent.replace(scriptRegex, `<script data-file="${fileName}">\n${content}\n</script>`)
-    } else if (!htmlContent.includes(content)) {
-      // Inject JS even if not referenced (auto-include all JS files)
+    } else {
       htmlContent = htmlContent.replace("</body>", `<script data-file="${fileName}">\n${content}\n</script>\n</body>`)
     }
   })
 
-  // Create asset mapping script to inject into preview
-  const assetMappingScript = `
+  // Asset mapping script & Live console interceptor
+  const bridgeScript = `
   <script>
-    // Asset mapping for resolving asset paths
     window.__ASSET_MAP__ = ${JSON.stringify(Object.fromEntries(assetMap))};
-    
-    // Override image loading to use asset map
+
+    // Asset interceptor
     (function() {
       const originalImage = window.Image;
       window.Image = function() {
         const img = new originalImage();
         const originalSrcDescriptor = Object.getOwnPropertyDescriptor(HTMLImageElement.prototype, 'src');
-        
         Object.defineProperty(img, 'src', {
-          get: function() {
-            return originalSrcDescriptor.get.call(this);
-          },
-          set: function(value) {
-            // Check if this is an asset path
-            if (window.__ASSET_MAP__ && window.__ASSET_MAP__[value]) {
-              originalSrcDescriptor.set.call(this, window.__ASSET_MAP__[value]);
+          get: function() { return originalSrcDescriptor.get.call(this); },
+          set: function(val) {
+            if (window.__ASSET_MAP__ && window.__ASSET_MAP__[val]) {
+              originalSrcDescriptor.set.call(this, window.__ASSET_MAP__[val]);
             } else {
-              originalSrcDescriptor.set.call(this, value);
+              originalSrcDescriptor.set.call(this, val);
             }
           }
         });
-        
         return img;
       };
-      
-      // Intercept setAttribute for img tags
-      const originalSetAttribute = Element.prototype.setAttribute;
-      Element.prototype.setAttribute = function(name, value) {
-        if (this.tagName === 'IMG' && name === 'src' && window.__ASSET_MAP__ && window.__ASSET_MAP__[value]) {
-          originalSetAttribute.call(this, name, window.__ASSET_MAP__[value]);
+
+      const originalSetAttr = Element.prototype.setAttribute;
+      Element.prototype.setAttribute = function(name, val) {
+        if (this.tagName === 'IMG' && name === 'src' && window.__ASSET_MAP__ && window.__ASSET_MAP__[val]) {
+          originalSetAttr.call(this, name, window.__ASSET_MAP__[val]);
         } else {
-          originalSetAttribute.call(this, name, value);
+          originalSetAttr.call(this, name, val);
         }
-      };
-      
-      // Handle CSS background images
-      const originalStyleSetProperty = CSSStyleDeclaration.prototype.setProperty;
-      CSSStyleDeclaration.prototype.setProperty = function(property, value, priority) {
-        if ((property === 'background' || property === 'background-image') && typeof value === 'string') {
-          // Extract URL from CSS url() function
-          const urlMatch = value.match(/url\\(['"]?([^'"\\)]+)['"]?\\)/);
-          if (urlMatch && window.__ASSET_MAP__ && window.__ASSET_MAP__[urlMatch[1]]) {
-            value = value.replace(urlMatch[1], window.__ASSET_MAP__[urlMatch[1]]);
-          }
-        }
-        return originalStyleSetProperty.call(this, property, value, priority);
       };
     })();
-  </script>
-  `
 
-  const consoleScript = `
-  <script>
-    (function() {
-      // Ensure window and required objects exist
-      if (typeof window === 'undefined' || !window) return;
-      
-      // Hot reload listener
-      window.addEventListener('message', function(event) {
-        if (event.data.type === 'hot-reload-css') {
-          const fileName = event.data.fileName;
-          const content = event.data.content;
-          
-          // Find existing style tag with this file
-          let styleTag = document.querySelector('style[data-file="' + fileName + '"]');
-          
-          if (styleTag) {
-            // Update existing style
-            styleTag.textContent = content;
-            // console.log('[Hot Reload] Updated CSS:', fileName);
-          } else {
-            // Create new style tag
-            styleTag = document.createElement('style');
-            styleTag.setAttribute('data-file', fileName);
-            styleTag.textContent = content;
-            document.head.appendChild(styleTag);
-            // console.log('[Hot Reload] Added CSS:', fileName);
-          }
-        } else if (event.data.type === 'hot-reload-js') {
-          const fileName = event.data.fileName;
-          const content = event.data.content;
-          
-          // For JS, we need to re-execute
-          // Remove old script if exists
-          const oldScript = document.querySelector('script[data-file="' + fileName + '"]');
-          if (oldScript) {
-            oldScript.remove();
-          }
-          
-          // Execute new script
-          try {
-            const script = document.createElement('script');
-            script.setAttribute('data-file', fileName);
-            script.textContent = content;
-            document.body.appendChild(script);
-            // console.log('[Hot Reload] Updated JS:', fileName);
-          } catch (e) {
-            console.error('[Hot Reload] JS execution error:', e);
-          }
-        } else if (event.data.type === 'hot-reload-html') {
-          const content = event.data.content;
-          
-          try {
-            // Save scroll position
-            const scrollX = window.scrollX;
-            const scrollY = window.scrollY;
-            
-            // Parse the new HTML to extract body content
-            const parser = new DOMParser();
-            const newDoc = parser.parseFromString(content, 'text/html');
-            const newBody = newDoc.body;
-            
-            if (newBody) {
-              // Preserve existing scripts and styles (they're managed separately)
-              const existingScripts = Array.from(document.querySelectorAll('script[data-file]'));
-              const existingStyles = Array.from(document.querySelectorAll('style[data-file]'));
-              
-              // Update body content
-              document.body.innerHTML = newBody.innerHTML;
-              
-              // Re-append managed scripts and styles
-              existingStyles.forEach(function(style) {
-                document.head.appendChild(style);
-              });
-              
-              existingScripts.forEach(function(script) {
-                // Re-execute scripts
-                const newScript = document.createElement('script');
-                newScript.setAttribute('data-file', script.getAttribute('data-file'));
-                newScript.textContent = script.textContent;
-                document.body.appendChild(newScript);
-              });
-              
-              // Restore scroll position
-              window.scrollTo(scrollX, scrollY);
-              
-              // console.log('[Hot Reload] Updated HTML body');
-            }
-          } catch (e) {
-            console.error('[Hot Reload] HTML update error:', e);
-          }
+    // Live Hot Reload Listener & REPL Eval
+    window.addEventListener('message', function(event) {
+      if (!event.data) return;
+
+      if (event.data.type === 'hot-reload-css') {
+        let styleTag = document.querySelector('style[data-file="' + event.data.fileName + '"]');
+        if (styleTag) {
+          styleTag.textContent = event.data.content;
+        } else {
+          styleTag = document.createElement('style');
+          styleTag.setAttribute('data-file', event.data.fileName);
+          styleTag.textContent = event.data.content;
+          document.head.appendChild(styleTag);
         }
-      });
-      
-      const originalLog = console.log;
-      const originalError = console.error;
-      const originalWarn = console.warn;
-      
-      console.log = function(...args) {
-        originalLog.apply(console, args);
+      } else if (event.data.type === 'hot-reload-js') {
+        const oldScript = document.querySelector('script[data-file="' + event.data.fileName + '"]');
+        if (oldScript) oldScript.remove();
         try {
-          if (window.parent && window.parent.postMessage) {
-            window.parent.postMessage({ 
-              type: 'console', 
-              method: 'log', 
-              args: args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg))
-            }, '*');
-          }
-        } catch (e) {}
-      };
-      
-      console.error = function(...args) {
-        originalError.apply(console, args);
+          const script = document.createElement('script');
+          script.setAttribute('data-file', event.data.fileName);
+          script.textContent = event.data.content;
+          document.body.appendChild(script);
+        } catch (e) {
+          console.error('[Live JS Error]:', e);
+        }
+      } else if (event.data.type === 'eval-repl') {
         try {
-          if (window.parent && window.parent.postMessage) {
-            window.parent.postMessage({ 
-              type: 'console', 
-              method: 'error', 
-              args: args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg))
-            }, '*');
-          }
-        } catch (e) {}
-      };
-      
-      console.warn = function(...args) {
-        originalWarn.apply(console, args);
-        try {
-          if (window.parent && window.parent.postMessage) {
-            window.parent.postMessage({ 
-              type: 'console', 
-              method: 'warn', 
-              args: args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg))
-            }, '*');
-          }
-        } catch (e) {}
-      };
-      
-      // Add event listeners only if window exists and has addEventListener
-      if (window && window.addEventListener) {
-        window.addEventListener('error', (event) => {
-          try {
-            if (window.parent && window.parent.postMessage) {
-              window.parent.postMessage({ 
-                type: 'console', 
-                method: 'error', 
-                args: [event.message + ' at ' + event.filename + ':' + event.lineno]
-              }, '*');
-            }
-          } catch (e) {}
-        });
-        
-        window.addEventListener('unhandledrejection', (event) => {
-          try {
-            if (window.parent && window.parent.postMessage) {
-              window.parent.postMessage({ 
-                type: 'console', 
-                method: 'error', 
-                args: ['Unhandled Promise Rejection: ' + event.reason]
-              }, '*');
-            }
-          } catch (e) {}
-        });
+          const result = window.eval(event.data.expression);
+          console.log('[REPL Result]:', result);
+        } catch (err) {
+          console.error('[REPL Error]:', err.message);
+        }
       }
+    });
+
+    // Console Logging Bridge
+    (function() {
+      const sendConsole = (method, args) => {
+        try {
+          if (window.parent && window.parent.postMessage) {
+            window.parent.postMessage({
+              type: 'console',
+              method: method,
+              args: args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg))
+            }, '*');
+          }
+        } catch (e) {}
+      };
+
+      const origLog = console.log;
+      const origError = console.error;
+      const origWarn = console.warn;
+      const origInfo = console.info;
+
+      console.log = function(...args) { origLog.apply(console, args); sendConsole('log', args); };
+      console.error = function(...args) { origError.apply(console, args); sendConsole('error', args); };
+      console.warn = function(...args) { origWarn.apply(console, args); sendConsole('warn', args); };
+      console.info = function(...args) { origInfo.apply(console, args); sendConsole('info', args); };
+
+      window.addEventListener('error', (e) => sendConsole('error', [e.message + ' (' + e.filename + ':' + e.lineno + ')']));
+      window.addEventListener('unhandledrejection', (e) => sendConsole('error', ['Unhandled Promise: ' + e.reason]));
     })();
   </script>
   `
 
-  // Replace asset references in HTML with data URLs
+  // Replace assets in HTML
   assetMap.forEach((dataUrl, path) => {
-    // Replace in img src attributes
-    const imgRegex = new RegExp(`<img([^>]*?)src=["']${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}["']`, 'gi')
-    htmlContent = htmlContent.replace(imgRegex, `<img$1src="${dataUrl}"`)
-    
-    // Replace in CSS url() references
-    const cssUrlRegex = new RegExp(`url\\(['"]?${path.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}['"]?\\)`, 'gi')
-    htmlContent = htmlContent.replace(cssUrlRegex, `url('${dataUrl}')`)
+    const regex = new RegExp(path.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")
+    htmlContent = htmlContent.replace(regex, dataUrl)
   })
 
-  // Inject asset mapping script and console script before closing body tag
-  htmlContent = htmlContent.replace("</body>", `${assetMappingScript}\n${consoleScript}\n</body>`)
+  if (htmlContent.includes("</body>")) {
+    htmlContent = htmlContent.replace("</body>", `${bridgeScript}\n</body>`)
+  } else {
+    htmlContent = htmlContent + `\n${bridgeScript}`
+  }
 
   return htmlContent
 }
