@@ -1,42 +1,41 @@
 "use client"
 
-import type React from "react"
-
-import { useState } from "react"
-import { Upload, X, File } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
+import React, { useState } from "react"
+import { Upload, X, Image as ImageIcon, Copy, Check, FileCode, FileSpreadsheet, Trash2 } from "lucide-react"
+import { toast } from "sonner"
 
 interface AssetManagerProps {
   onAssetAdd: (name: string, content: string, type: string) => void
 }
 
 export function AssetManager({ onAssetAdd }: AssetManagerProps) {
-  const [isOpen, setIsOpen] = useState(false)
-  const [assets, setAssets] = useState<Array<{ name: string; url: string; type: string }>>([])
+  const [assets, setAssets] = useState<Array<{ name: string; url: string; type: string; size: string }>>([])
   const [isDragging, setIsDragging] = useState(false)
+  const [copiedPath, setCopiedPath] = useState<string | null>(null)
 
   const handleFileUpload = (files: FileList | null) => {
-    if (!files) return
+    if (!files || files.length === 0) return
 
     Array.from(files).forEach((file) => {
       const reader = new FileReader()
 
       reader.onload = (e) => {
         const content = e.target?.result as string
+        const sizeFormatted = `${(file.size / 1024).toFixed(1)} KB`
+
         const asset = {
           name: file.name,
           url: content,
-          type: file.type,
+          type: file.type || "application/octet-stream",
+          size: sizeFormatted,
         }
 
         setAssets((prev) => [...prev, asset])
-
-        // Add to file system in assets folder
         onAssetAdd(`/assets/${file.name}`, content, file.type)
+        toast.success(`Uploaded ${file.name}`)
       }
 
-      if (file.type.startsWith("image/")) {
+      if (file.type.startsWith("image/") || file.type.includes("svg")) {
         reader.readAsDataURL(file)
       } else {
         reader.readAsText(file)
@@ -50,129 +49,140 @@ export function AssetManager({ onAssetAdd }: AssetManagerProps) {
     handleFileUpload(e.dataTransfer.files)
   }
 
-  const handleDragOver = (e: React.DragEvent) => {
-    e.preventDefault()
-    setIsDragging(true)
-  }
-
-  const handleDragLeave = () => {
-    setIsDragging(false)
-  }
-
   const removeAsset = (index: number) => {
     setAssets((prev) => prev.filter((_, i) => i !== index))
+    toast.info("Asset removed from session")
   }
 
-  const copyPath = (name: string) => {
+  const copySnippet = (name: string, type: string) => {
     const path = `/assets/${name}`
-    navigator.clipboard.writeText(path)
-    alert(`Path copied: ${path}`)
+    let snippet = `<img src="${path}" alt="${name}" />`
+    if (type.endsWith("css")) {
+      snippet = `background-image: url('${path}');`
+    }
+    navigator.clipboard.writeText(snippet)
+    setCopiedPath(name)
+    toast.success(`Copied: ${snippet}`)
+    setTimeout(() => setCopiedPath(null), 2000)
   }
 
   return (
-    <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogTrigger asChild>
-        <Button variant="ghost" size="sm" className="text-[#cccccc] hover:bg-[#2d2d2d] cursor-pointer">
-          <Upload className="h-4 w-4 mr-2" />
-          Assets
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="bg-[#252526] border-[#454545] text-[#cccccc] max-w-2xl p-0 gap-0">
-        <DialogHeader className="px-6 py-4 border-b border-[#454545] bg-[#2d2d2d]">
-          <DialogTitle className="text-xl text-white font-semibold">Asset Manager</DialogTitle>
-          <p className="text-xs text-[#858585] mt-1">Upload and manage your project assets</p>
-        </DialogHeader>
+    <div className="h-full flex flex-col bg-[#121215] text-zinc-200 select-none overflow-hidden">
+      {/* Header */}
+      <div className="p-4 border-b border-white/[0.08] flex items-center justify-between flex-none bg-[#121215]">
+        <div className="flex items-center gap-2">
+          <ImageIcon className="h-4 w-4 text-cyan-400" />
+          <span className="text-sm font-bold text-white tracking-tight">Assets & Media Locker</span>
+        </div>
+        {assets.length > 0 && (
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/30">
+            {assets.length} Files
+          </span>
+        )}
+      </div>
 
-        <div className="space-y-5 p-6">
-          {/* Upload Area */}
-          <div
-            className={`border-2 border-dashed rounded-lg p-8 text-center transition-colors ${
-              isDragging ? "border-blue-500 bg-blue-500/10" : "border-[#454545] hover:border-[#656565]"
-            }`}
-            onDrop={handleDrop}
-            onDragOver={handleDragOver}
-            onDragLeave={handleDragLeave}
-          >
-            <Upload className="h-12 w-12 mx-auto mb-4 text-[#858585]" />
-            <p className="text-sm mb-2">Drag and drop files here</p>
-            <p className="text-xs text-[#858585] mb-4">or</p>
-            <label className="cursor-pointer">
-              <input
-                type="file"
-                multiple
-                accept="image/*,.svg,.css,.js"
-                className="hidden"
-                onChange={(e) => handleFileUpload(e.target.files)}
-              />
-              <span className="inline-block px-4 py-2 bg-[#0e639c] hover:bg-[#1177bb] rounded text-sm cursor-pointer transition-colors">
-                Browse Files
-              </span>
-            </label>
-            <p className="text-xs text-[#858585] mt-4">Supported: Images (PNG, JPG, GIF, SVG), CSS, JS</p>
-          </div>
+      <div className="flex-1 overflow-y-auto p-4 space-y-4">
+        {/* Drag and Drop Zone */}
+        <div
+          onDrop={handleDrop}
+          onDragOver={(e) => {
+            e.preventDefault()
+            setIsDragging(true)
+          }}
+          onDragLeave={() => setIsDragging(false)}
+          className={`border-2 border-dashed rounded-2xl p-6 text-center transition-all ${
+            isDragging
+              ? "border-indigo-500 bg-indigo-500/10 scale-[0.99]"
+              : "border-white/[0.1] bg-[#18181b]/50 hover:border-white/20"
+          }`}
+        >
+          <Upload className="h-8 w-8 mx-auto mb-2 text-zinc-500" />
+          <p className="text-xs font-semibold text-zinc-200 mb-1">Drag and drop images or media</p>
+          <p className="text-[11px] text-zinc-500 mb-4">PNG, JPG, SVG, WebP, GIF up to 5MB</p>
 
-          {/* Assets List */}
-          {assets.length > 0 && (
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold text-white">Uploaded Assets</h3>
-              <div className="max-h-64 overflow-auto space-y-2">
-                {assets.map((asset, index) => (
+          <label className="cursor-pointer">
+            <input
+              type="file"
+              multiple
+              accept="image/*,.svg,.json"
+              className="hidden"
+              onChange={(e) => handleFileUpload(e.target.files)}
+            />
+            <span className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold shadow-md transition-all">
+              Browse Media
+            </span>
+          </label>
+        </div>
+
+        {/* Assets Grid */}
+        {assets.length > 0 ? (
+          <div className="space-y-2">
+            <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Uploaded Assets</span>
+            <div className="grid grid-cols-1 gap-2.5">
+              {assets.map((asset, idx) => {
+                const isImage = asset.type.startsWith("image/") || asset.name.endsWith(".svg")
+
+                return (
                   <div
-                    key={index}
-                    className="flex items-center gap-3 p-3 bg-[#1e1e1e] rounded hover:bg-[#2d2d2d] group"
+                    key={idx}
+                    className="p-2.5 rounded-xl bg-[#18181b] border border-white/[0.08] hover:border-indigo-500/40 transition-all flex items-center gap-3 group"
                   >
-                    {asset.type.startsWith("image/") ? (
+                    {isImage ? (
                       <img
-                        src={asset.url || "/placeholder.svg"}
+                        src={asset.url}
                         alt={asset.name}
-                        className="h-10 w-10 object-cover rounded"
+                        className="h-10 w-10 object-cover rounded-lg bg-black/40 border border-white/[0.08]"
                       />
                     ) : (
-                      <div className="h-10 w-10 bg-[#2d2d2d] rounded flex items-center justify-center">
-                        <File className="h-5 w-5 text-[#858585]" />
+                      <div className="h-10 w-10 rounded-lg bg-white/[0.05] flex items-center justify-center text-zinc-400">
+                        <FileSpreadsheet className="h-5 w-5" />
                       </div>
                     )}
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm truncate">{asset.name}</p>
-                      <p className="text-xs text-[#858585]">{asset.type}</p>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => copyPath(asset.name)}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity cursor-pointer"
-                    >
-                      Copy Path
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => removeAsset(index)}
-                      className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500/20 cursor-pointer"
-                    >
-                      <X className="h-4 w-4 text-red-400" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
 
-          {/* Usage Instructions */}
-          <div className="bg-[#1e1e1e] p-4 rounded-lg border border-[#454545] text-xs space-y-2">
-            <p className="font-semibold text-white">How to use assets:</p>
-            <p className="text-[#858585]">
-              In HTML: <code className="bg-[#2d2d2d] px-1 py-0.5 rounded">&lt;img src="/assets/image.png"&gt;</code>
-            </p>
-            <p className="text-[#858585]">
-              In CSS: <code className="bg-[#2d2d2d] px-1 py-0.5 rounded">background: url('/assets/image.png')</code>
-            </p>
-            <p className="text-yellow-500 mt-2">
-              ⚠️ Note: Assets are session-only and won't be saved to localStorage due to size limits.
-            </p>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-semibold text-white truncate">{asset.name}</p>
+                      <p className="text-[10px] text-zinc-500 font-mono">/assets/{asset.name} • {asset.size}</p>
+                    </div>
+
+                    <div className="flex items-center gap-1">
+                      <button
+                        onClick={() => copySnippet(asset.name, asset.type)}
+                        className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/[0.08] transition-colors"
+                        title="Copy <img> snippet"
+                      >
+                        {copiedPath === asset.name ? (
+                          <Check className="h-3.5 w-3.5 text-emerald-400" />
+                        ) : (
+                          <Copy className="h-3.5 w-3.5" />
+                        )}
+                      </button>
+
+                      <button
+                        onClick={() => removeAsset(idx)}
+                        className="p-1.5 rounded-lg text-zinc-500 hover:text-rose-400 hover:bg-rose-500/20 transition-colors"
+                        title="Delete asset"
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+        ) : null}
+
+        {/* Instructions */}
+        <div className="p-3.5 rounded-xl bg-[#18181b] border border-white/[0.06] text-xs space-y-1.5 text-zinc-400">
+          <p className="font-semibold text-zinc-200">How to reference assets:</p>
+          <div className="font-mono text-[11px] bg-black/40 p-2 rounded-lg text-indigo-300">
+            &lt;img src="/assets/logo.png" /&gt;
+          </div>
+          <div className="font-mono text-[11px] bg-black/40 p-2 rounded-lg text-indigo-300">
+            background: url('/assets/bg.jpg');
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      </div>
+    </div>
   )
 }
