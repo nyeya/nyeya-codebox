@@ -1,86 +1,120 @@
 "use client"
 
-import { useState } from "react"
-import { Package, Plus, X, Search } from "lucide-react"
+import React, { useState } from "react"
+import { Package, Plus, X, Search, Check, ExternalLink, Sparkles } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
+import type { Library } from "@/lib/export-project"
+import { toast } from "sonner"
 
-interface Library {
-  name: string
-  url: string
-  type: "css" | "js"
-  description: string
-}
+const popularLibraries: (Library & { category: string })[] = [
+  // Frameworks
+  {
+    name: "React 19 (UMD)",
+    url: "https://unpkg.com/react@19/umd/react.production.min.js",
+    type: "js",
+    category: "Frameworks",
+    description: "Component-based user interface library",
+  },
+  {
+    name: "React DOM 19 (UMD)",
+    url: "https://unpkg.com/react-dom@19/umd/react-dom.production.min.js",
+    type: "js",
+    category: "Frameworks",
+    description: "React DOM renderer for web apps",
+  },
+  {
+    name: "Alpine.js 3",
+    url: "https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/cdn.min.js",
+    type: "js",
+    category: "Frameworks",
+    description: "Lightweight reactive frontend framework",
+  },
+  {
+    name: "HTMX 2.0",
+    url: "https://unpkg.com/htmx.org@2.0.0",
+    type: "js",
+    category: "Frameworks",
+    description: "High-power HTML extensions for modern web",
+  },
 
-const popularLibraries: Library[] = [
+  // Styling & UI
   {
-    name: "jQuery",
-    url: "https://code.jquery.com/jquery-3.7.1.min.js",
+    name: "Tailwind CSS CDN",
+    url: "https://cdn.tailwindcss.com",
     type: "js",
-    description: "Fast, small, and feature-rich JavaScript library",
+    category: "Styling",
+    description: "Utility-first CSS framework with JIT in-browser compiler",
   },
   {
-    name: "Bootstrap CSS",
-    url: "https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css",
-    type: "css",
-    description: "Popular CSS framework",
-  },
-  {
-    name: "Bootstrap JS",
-    url: "https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js",
-    type: "js",
-    description: "Bootstrap JavaScript components",
-  },
-  { name: "Tailwind CSS", url: "https://cdn.tailwindcss.com", type: "js", description: "Utility-first CSS framework" },
-  {
-    name: "Font Awesome",
+    name: "Font Awesome 6",
     url: "https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css",
     type: "css",
-    description: "Icon library",
+    category: "Styling",
+    description: "Comprehensive modern icon library",
   },
   {
     name: "Animate.css",
     url: "https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css",
     type: "css",
-    description: "CSS animations library",
+    category: "Styling",
+    description: "Cross-browser CSS animations library",
+  },
+
+  // 3D & Graphics
+  {
+    name: "Three.js",
+    url: "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js",
+    type: "js",
+    category: "3D & Canvas",
+    description: "Complete WebGL 3D graphics library",
   },
   {
-    name: "Lodash",
-    url: "https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js",
+    name: "Canvas Confetti",
+    url: "https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.2/dist/confetti.browser.min.js",
     type: "js",
-    description: "JavaScript utility library",
+    category: "3D & Canvas",
+    description: "Celebration confetti particle explosions",
+  },
+
+  // Animation
+  {
+    name: "GSAP 3.12",
+    url: "https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.4/gsap.min.js",
+    type: "js",
+    category: "Animation",
+    description: "High-performance JavaScript animation platform",
+  },
+  {
+    name: "Anime.js",
+    url: "https://cdnjs.cloudflare.com/ajax/libs/animejs/3.2.1/anime.min.js",
+    type: "js",
+    category: "Animation",
+    description: "Flexible JavaScript animation library",
+  },
+
+  // Utilities
+  {
+    name: "Chart.js 4",
+    url: "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js",
+    type: "js",
+    category: "Utilities",
+    description: "Dynamic responsive HTML5 canvas charts",
   },
   {
     name: "Axios",
     url: "https://cdn.jsdelivr.net/npm/axios@1.6.2/dist/axios.min.js",
     type: "js",
-    description: "Promise-based HTTP client",
+    category: "Utilities",
+    description: "Promise-based HTTP client for browser",
   },
   {
-    name: "Chart.js",
-    url: "https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js",
+    name: "Lodash",
+    url: "https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js",
     type: "js",
-    description: "Simple yet flexible JavaScript charting",
-  },
-  {
-    name: "Alpine.js",
-    url: "https://cdn.jsdelivr.net/npm/alpinejs@3.13.3/dist/cdn.min.js",
-    type: "js",
-    description: "Lightweight JavaScript framework",
-  },
-  {
-    name: "GSAP",
-    url: "https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.4/gsap.min.js",
-    type: "js",
-    description: "Professional-grade animation library",
-  },
-  {
-    name: "Three.js",
-    url: "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.min.js",
-    type: "js",
-    description: "3D graphics library",
+    category: "Utilities",
+    description: "Modern JavaScript utility library",
   },
 ]
 
@@ -91,161 +125,203 @@ interface LibraryManagerProps {
 }
 
 export function LibraryManager({ onLibraryAdd, addedLibraries, onLibraryRemove }: LibraryManagerProps) {
-  const [isOpen, setIsOpen] = useState(false)
   const [searchQuery, setSearchQuery] = useState("")
   const [customUrl, setCustomUrl] = useState("")
+  const [customName, setCustomName] = useState("")
   const [customType, setCustomType] = useState<"css" | "js">("js")
+  const [categoryFilter, setCategoryFilter] = useState("All")
 
-  const filteredLibraries = popularLibraries.filter(
-    (lib) =>
+  const categories = ["All", "Frameworks", "Styling", "3D & Canvas", "Animation", "Utilities"]
+
+  const filteredLibraries = popularLibraries.filter((lib) => {
+    const matchesSearch =
       lib.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      lib.description.toLowerCase().includes(searchQuery.toLowerCase()),
-  )
+      lib.description.toLowerCase().includes(searchQuery.toLowerCase())
+    const matchesCat = categoryFilter === "All" || lib.category === categoryFilter
+    return matchesSearch && matchesCat
+  })
 
   const isLibraryAdded = (url: string) => {
     return addedLibraries.some((lib) => lib.url === url)
   }
 
-  const handleAddLibrary = (library: Library) => {
-    if (!isLibraryAdded(library.url)) {
-      onLibraryAdd(library)
-    }
-  }
-
   const handleAddCustom = () => {
     if (customUrl.trim()) {
+      const name = customName.trim() || customUrl.split("/").pop()?.split("?")[0] || "Custom CDN"
       const customLib: Library = {
-        name: "Custom Library",
+        name,
         url: customUrl.trim(),
         type: customType,
-        description: "Custom CDN library",
+        description: "User added external package",
       }
       onLibraryAdd(customLib)
       setCustomUrl("")
+      setCustomName("")
+      toast.success(`Injected ${name}`)
     }
   }
 
   return (
-    <Dialog open={isOpen} onOpenChange={setIsOpen}>
-      <DialogTrigger asChild>
-        <Button variant="ghost" size="sm" className="text-[#cccccc] hover:bg-[#2d2d2d] cursor-pointer">
-          <Package className="h-4 w-4 mr-2" />
-          Libraries
-          {addedLibraries.length > 0 && (
-            <Badge variant="secondary" className="ml-2 px-2 py-0.5 bg-[#0e639c] text-white rounded-full">
-              {addedLibraries.length}
-            </Badge>
-          )}
-        </Button>
-      </DialogTrigger>
-      <DialogContent className="bg-[#252526] border-[#454545] text-[#cccccc] max-w-3xl max-h-[80vh] overflow-hidden flex flex-col p-0 gap-0">
-        <DialogHeader className="px-6 py-4 border-b border-[#454545] bg-[#2d2d2d]">
-          <DialogTitle className="text-xl text-white font-semibold">External Libraries</DialogTitle>
-          <p className="text-xs text-[#858585] mt-1">Add CDN libraries to your project</p>
-        </DialogHeader>
+    <div className="h-full flex flex-col bg-[#121215] text-zinc-200 select-none overflow-hidden">
+      {/* Header */}
+      <div className="p-4 border-b border-white/[0.08] flex items-center justify-between flex-none bg-[#121215]">
+        <div className="flex items-center gap-2">
+          <Package className="h-4 w-4 text-indigo-400" />
+          <span className="text-sm font-bold text-white tracking-tight">CDN Packages & Hub</span>
+        </div>
+        {addedLibraries.length > 0 && (
+          <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-bold border border-indigo-500/30">
+            {addedLibraries.length} Active
+          </span>
+        )}
+      </div>
 
-        <div className="space-y-4 flex-1 overflow-hidden flex flex-col p-6">
-          {/* Added Libraries */}
-          {addedLibraries.length > 0 && (
-            <div className="space-y-3">
-              <h3 className="text-sm font-semibold text-white">Added Libraries ({addedLibraries.length})</h3>
-              <div className="space-y-2 max-h-32 overflow-auto">
-                {addedLibraries.map((lib, index) => (
-                  <div
-                    key={index}
-                    className="flex items-center justify-between p-2 bg-[#1e1e1e] rounded hover:bg-[#2d2d2d] group"
-                  >
-                    <div className="flex-1 min-w-0">
-                      <div className="flex items-center gap-2">
-                        <span className="text-sm font-medium">{lib.name}</span>
-                        <Badge variant="outline" className="text-xs px-2 py-0.5">
-                          {lib.type.toUpperCase()}
-                        </Badge>
-                      </div>
-                      <p className="text-xs text-[#858585] truncate">{lib.url}</p>
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => onLibraryRemove(lib.url)}
-                      className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity hover:bg-red-500/20"
-                    >
-                      <X className="h-4 w-4 text-red-400" />
-                    </Button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Search */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-[#858585]" />
-            <Input
-              placeholder="Search libraries..."
-              value={searchQuery}
-              onChange={(e) => setSearchQuery(e.target.value)}
-              className="pl-10 bg-[#1e1e1e] border-[#454545] text-[#cccccc]"
-            />
-          </div>
-
-          {/* Popular Libraries */}
-          <div className="flex-1 overflow-hidden flex flex-col">
-            <h3 className="text-sm font-semibold text-white mb-3">Popular Libraries</h3>
-            <div className="flex-1 overflow-auto space-y-2">
-              {filteredLibraries.map((lib, index) => (
-                <div
-                  key={index}
-                  className="flex items-center justify-between p-3 bg-[#1e1e1e] rounded hover:bg-[#2d2d2d]"
-                >
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-sm font-medium">{lib.name}</span>
-                      <Badge variant="outline" className="text-xs px-2 py-0.5">
-                        {lib.type.toUpperCase()}
-                      </Badge>
-                    </div>
-                    <p className="text-xs text-[#858585]">{lib.description}</p>
-                  </div>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => handleAddLibrary(lib)}
-                    disabled={isLibraryAdded(lib.url)}
-                    className={isLibraryAdded(lib.url) ? "opacity-50 cursor-not-allowed" : "hover:bg-[#0e639c] cursor-pointer transition-colors"}
-                  >
-                    {isLibraryAdded(lib.url) ? "Added" : "Add"}
-                  </Button>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Custom CDN */}
-          <div className="space-y-3 border-t border-[#454545] pt-4">
-            <h3 className="text-sm font-semibold text-white">Add Custom CDN</h3>
-            <div className="flex gap-2">
-              <Input
-                placeholder="https://cdn.example.com/library.js"
-                value={customUrl}
-                onChange={(e) => setCustomUrl(e.target.value)}
-                className="flex-1 bg-[#1e1e1e] border-[#454545] text-[#cccccc]"
-              />
-              <select
-                value={customType}
-                onChange={(e) => setCustomType(e.target.value as "css" | "js")}
-                className="px-3 py-2 bg-[#1e1e1e] border border-[#454545] rounded text-[#cccccc] text-sm cursor-pointer hover:border-[#656565] transition-colors"
+      {/* Added Packages Section */}
+      {addedLibraries.length > 0 && (
+        <div className="p-3 border-b border-white/[0.08] bg-[#0e0e11] space-y-2">
+          <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Active Dependencies</span>
+          <div className="space-y-1.5 max-h-32 overflow-y-auto">
+            {addedLibraries.map((lib, idx) => (
+              <div
+                key={idx}
+                className="flex items-center justify-between p-2 rounded-lg bg-[#18181b] border border-white/[0.06] group hover:border-white/10"
               >
-                <option value="js">JS</option>
-                <option value="css">CSS</option>
-              </select>
-              <Button onClick={handleAddCustom} className="bg-[#0e639c] hover:bg-[#1177bb] cursor-pointer transition-colors" title="Add custom library">
-                <Plus className="h-4 w-4" />
-              </Button>
-            </div>
+                <div className="flex-1 min-w-0 mr-2">
+                  <div className="flex items-center gap-1.5">
+                    <span className="text-xs font-semibold text-white truncate">{lib.name}</span>
+                    <span className="text-[9px] px-1 py-0.2 bg-white/[0.08] text-zinc-400 font-mono rounded">
+                      {lib.type.toUpperCase()}
+                    </span>
+                  </div>
+                  <p className="text-[10px] text-zinc-500 truncate">{lib.url}</p>
+                </div>
+                <button
+                  onClick={() => {
+                    onLibraryRemove(lib.url)
+                    toast.info(`Removed ${lib.name}`)
+                  }}
+                  className="p-1 text-zinc-500 hover:text-rose-400 hover:bg-rose-500/20 rounded transition-colors"
+                  title="Remove Library"
+                >
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
           </div>
         </div>
-      </DialogContent>
-    </Dialog>
+      )}
+
+      {/* Search & Category Pills */}
+      <div className="p-3 border-b border-white/[0.08] space-y-2 flex-none">
+        <div className="relative">
+          <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-zinc-500" />
+          <input
+            type="text"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search CDN catalog..."
+            className="w-full bg-[#18181b] border border-white/[0.08] rounded-lg pl-8 pr-3 py-1.5 text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
+          />
+        </div>
+
+        <div className="flex items-center gap-1 overflow-x-auto pb-1 scrollbar-none">
+          {categories.map((cat) => (
+            <button
+              key={cat}
+              onClick={() => setCategoryFilter(cat)}
+              className={`px-2 py-1 rounded-md text-[10px] font-semibold whitespace-nowrap transition-colors ${
+                categoryFilter === cat
+                  ? "bg-indigo-600/30 text-indigo-300 border border-indigo-500/40"
+                  : "text-zinc-400 hover:text-white bg-white/[0.03]"
+              }`}
+            >
+              {cat}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Catalog List */}
+      <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
+        {filteredLibraries.map((lib, idx) => {
+          const added = isLibraryAdded(lib.url)
+
+          return (
+            <div
+              key={idx}
+              className="p-3 rounded-xl bg-[#18181b] border border-white/[0.08] hover:border-indigo-500/40 transition-all flex items-center justify-between gap-3 group"
+            >
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-1.5 mb-1">
+                  <span className="text-xs font-semibold text-white group-hover:text-indigo-300 transition-colors">
+                    {lib.name}
+                  </span>
+                  <span className="text-[9px] px-1 py-0.2 rounded bg-white/[0.06] text-zinc-400 font-mono">
+                    {lib.type.toUpperCase()}
+                  </span>
+                </div>
+                <p className="text-[11px] text-zinc-400 leading-snug">{lib.description}</p>
+              </div>
+
+              <button
+                onClick={() => {
+                  if (added) {
+                    onLibraryRemove(lib.url)
+                    toast.info(`Removed ${lib.name}`)
+                  } else {
+                    onLibraryAdd(lib)
+                    toast.success(`Injected ${lib.name}`)
+                  }
+                }}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all shrink-0 ${
+                  added
+                    ? "bg-emerald-500/20 text-emerald-300 border border-emerald-500/30"
+                    : "bg-indigo-600/30 hover:bg-indigo-600/50 text-indigo-300 border border-indigo-500/30"
+                }`}
+              >
+                {added ? (
+                  <span className="flex items-center gap-1">
+                    <Check className="h-3 w-3" /> Added
+                  </span>
+                ) : (
+                  <span className="flex items-center gap-1">
+                    <Plus className="h-3 w-3" /> Add
+                  </span>
+                )}
+              </button>
+            </div>
+          )
+        })}
+      </div>
+
+      {/* Custom CDN Ingestion Bar */}
+      <div className="p-3 border-t border-white/[0.08] bg-[#0e0e11] space-y-2 flex-none">
+        <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Custom CDN Script / CSS</span>
+        <div className="flex gap-1.5">
+          <input
+            type="text"
+            placeholder="https://cdn.example.com/lib.min.js"
+            value={customUrl}
+            onChange={(e) => setCustomUrl(e.target.value)}
+            className="flex-1 bg-[#18181b] border border-white/[0.08] rounded-lg px-2.5 py-1 text-xs text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
+          />
+          <select
+            value={customType}
+            onChange={(e) => setCustomType(e.target.value as "css" | "js")}
+            className="bg-[#18181b] border border-white/[0.08] rounded-lg px-2 py-1 text-xs text-zinc-300 focus:outline-none"
+          >
+            <option value="js">JS</option>
+            <option value="css">CSS</option>
+          </select>
+          <button
+            onClick={handleAddCustom}
+            disabled={!customUrl.trim()}
+            className="px-3 py-1 bg-indigo-600 hover:bg-indigo-500 disabled:opacity-30 text-white rounded-lg text-xs font-semibold transition-all"
+          >
+            Inject
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
