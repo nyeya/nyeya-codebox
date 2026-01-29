@@ -1,11 +1,12 @@
 "use client"
 
-import { X } from "lucide-react"
-import { Button } from "@/components/ui/button"
-import { useTheme } from "next-themes"
+import React from "react"
+import { Settings, Sliders, Palette, ShieldCheck, Terminal } from "lucide-react"
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog"
 import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { Button } from "@/components/ui/button"
 
 interface SettingsPanelProps {
   open: boolean
@@ -22,168 +23,172 @@ interface SettingsPanelProps {
 }
 
 export function SettingsPanel({ open, onClose, settings, onSettingsChange }: SettingsPanelProps) {
-  const { setTheme } = useTheme()
-  
-  if (!open) return null
-
   const updateSetting = (key: string, value: any) => {
     onSettingsChange({ ...settings, [key]: value })
   }
 
   return (
-    <div className="fixed inset-0 bg-black/60 backdrop-blur-sm flex items-center justify-center z-50 p-4">
-      <div className="bg-[#1e1e1e] border border-[#454545] rounded-xl shadow-2xl w-full max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
-        <div className="flex-none flex items-center justify-between px-6 py-4 border-b border-[#454545] bg-[#2d2d2d]">
-          <div>
-            <h2 className="text-xl font-semibold text-foreground">Settings</h2>
-            <p className="text-xs text-[#858585] mt-0.5">Customize your editor experience</p>
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl bg-[#18181b] border-white/[0.1] text-zinc-200 p-0 rounded-2xl overflow-hidden shadow-2xl">
+        <DialogHeader className="px-6 py-4 border-b border-white/[0.08] bg-[#121215]">
+          <div className="flex items-center gap-2 text-indigo-400">
+            <Settings className="h-5 w-5" />
+            <DialogTitle className="text-lg font-bold text-white">Editor Preferences</DialogTitle>
           </div>
-          <Button variant="ghost" size="icon" onClick={onClose} className="hover:bg-[#3e3e42] text-[#cccccc] cursor-pointer transition-colors">
-            <X className="h-5 w-5" />
-          </Button>
-        </div>
+          <DialogDescription className="text-xs text-zinc-400 mt-1">
+            Customize typography, theme, and runtime behavior
+          </DialogDescription>
+        </DialogHeader>
 
-        <div className="flex-1 overflow-y-auto p-8 space-y-10">
-          {/* Editor Theme Settings */}
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="h-1 w-1 rounded-full bg-[#0e639c]"></div>
-              <h3 className="text-sm font-semibold text-foreground uppercase tracking-wide">Editor Theme</h3>
+        <div className="p-6 space-y-6 max-h-[70vh] overflow-y-auto">
+          {/* Theme Section */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-indigo-400">
+              <Palette className="h-3.5 w-3.5" />
+              <span>Editor Theme</span>
             </div>
 
-            <div className="space-y-4 p-6 bg-[#252526] rounded-lg">
-              <Label htmlFor="editor-theme" className="text-[#cccccc] font-medium">
-                Editor Color Theme
-              </Label>
+            <div className="p-4 rounded-xl bg-[#121215] border border-white/[0.06] flex items-center justify-between">
+              <div>
+                <Label htmlFor="editor-theme" className="text-xs font-semibold text-white">
+                  Monaco Color Theme
+                </Label>
+                <p className="text-[11px] text-zinc-400 mt-0.5">Choose your preferred syntax highlighting</p>
+              </div>
+
               <Select
                 value={settings.editorTheme}
-                onValueChange={(value) => updateSetting("editorTheme", value)}
+                onValueChange={(val) => updateSetting("editorTheme", val)}
               >
-                <SelectTrigger id="editor-theme" className="bg-[#3c3c3c] border-[#454545] text-[#cccccc] hover:border-[#656565] transition-colors cursor-pointer">
+                <SelectTrigger id="editor-theme" className="w-44 bg-[#18181b] border-white/[0.1] text-xs text-zinc-200">
                   <SelectValue />
                 </SelectTrigger>
-                <SelectContent className="bg-[#252526] border-[#454545] text-[#cccccc]">
-                  <SelectItem value="vs-dark" className="cursor-pointer">Visual Studio Dark</SelectItem>
-                  <SelectItem value="vs-light" className="cursor-pointer">Visual Studio Light</SelectItem>
-                  <SelectItem value="hc-black" className="cursor-pointer">High Contrast Dark</SelectItem>
-                  <SelectItem value="monokai" className="cursor-pointer">Monokai</SelectItem>
-                  <SelectItem value="dracula" className="cursor-pointer">Dracula</SelectItem>
-                  <SelectItem value="github-dark" className="cursor-pointer">GitHub Dark</SelectItem>
-                  <SelectItem value="github-light" className="cursor-pointer">GitHub Light</SelectItem>
+                <SelectContent className="bg-[#18181b] border-white/[0.1] text-zinc-200">
+                  <SelectItem value="obsidian-dark">Obsidian Dark (Studio)</SelectItem>
+                  <SelectItem value="vs-dark">VS Code Dark</SelectItem>
+                  <SelectItem value="dracula">Dracula</SelectItem>
+                  <SelectItem value="monokai">Monokai</SelectItem>
+                  <SelectItem value="github-dark">GitHub Dark</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
 
-          {/* Editor Settings */}
-          <div className="space-y-4">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="h-1 w-1 rounded-full bg-[#0e639c]"></div>
-              <h3 className="text-sm font-semibold text-foreground uppercase tracking-wide">Editor</h3>
+          {/* Behavior Toggles */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-indigo-400">
+              <Sliders className="h-3.5 w-3.5" />
+              <span>Editor Behavior</span>
             </div>
 
-            <div className="flex items-center justify-between p-6 bg-[#1e1e1e] rounded-lg hover:bg-[#2a2a2d] transition-colors">
-              <div className="space-y-1">
-                <Label htmlFor="auto-save" className="text-[#cccccc] font-medium cursor-pointer">
-                  Auto Save
-                </Label>
-                <p className="text-xs text-[#858585]">Automatically save changes every 30 seconds</p>
+            <div className="space-y-2">
+              <div className="p-3.5 rounded-xl bg-[#121215] border border-white/[0.06] flex items-center justify-between">
+                <div>
+                  <Label htmlFor="auto-save" className="text-xs font-semibold text-white cursor-pointer">
+                    Auto-Save to LocalStorage
+                  </Label>
+                  <p className="text-[11px] text-zinc-400">Automatically sync project snapshot every 30 seconds</p>
+                </div>
+                <Switch
+                  id="auto-save"
+                  checked={settings.autoSave}
+                  onCheckedChange={(c) => updateSetting("autoSave", c)}
+                />
               </div>
-              <Switch
-                id="auto-save"
-                checked={settings.autoSave}
-                onCheckedChange={(checked) => updateSetting("autoSave", checked)}
-              />
-            </div>
 
-            <div className="flex items-center justify-between p-6 bg-[#1e1e1e] rounded-lg hover:bg-[#2a2a2d] transition-colors">
-              <div className="space-y-1">
-                <Label htmlFor="auto-format" className="text-[#cccccc] font-medium cursor-pointer">
-                  Auto Format
-                </Label>
-                <p className="text-xs text-[#858585]">Format code automatically on save</p>
+              <div className="p-3.5 rounded-xl bg-[#121215] border border-white/[0.06] flex items-center justify-between">
+                <div>
+                  <Label htmlFor="word-wrap" className="text-xs font-semibold text-white cursor-pointer">
+                    Word Wrap
+                  </Label>
+                  <p className="text-[11px] text-zinc-400">Wrap long lines to prevent horizontal scrolling</p>
+                </div>
+                <Switch
+                  id="word-wrap"
+                  checked={settings.wordWrap}
+                  onCheckedChange={(c) => updateSetting("wordWrap", c)}
+                />
               </div>
-              <Switch
-                id="auto-format"
-                checked={settings.autoFormat}
-                onCheckedChange={(checked) => updateSetting("autoFormat", checked)}
-              />
-            </div>
 
-            <div className="flex items-center justify-between p-6 bg-[#1e1e1e] rounded-lg hover:bg-[#2a2a2d] transition-colors">
-              <div className="space-y-1">
-                <Label htmlFor="word-wrap" className="text-[#cccccc] font-medium cursor-pointer">
-                  Word Wrap
-                </Label>
-                <p className="text-xs text-[#858585]">Wrap long lines in the editor</p>
+              <div className="p-3.5 rounded-xl bg-[#121215] border border-white/[0.06] flex items-center justify-between">
+                <div>
+                  <Label htmlFor="auto-format" className="text-xs font-semibold text-white cursor-pointer">
+                    Auto-Format with Prettier
+                  </Label>
+                  <p className="text-[11px] text-zinc-400">Automatically format code on manual save (Ctrl+S)</p>
+                </div>
+                <Switch
+                  id="auto-format"
+                  checked={settings.autoFormat}
+                  onCheckedChange={(c) => updateSetting("autoFormat", c)}
+                />
               </div>
-              <Switch
-                id="word-wrap"
-                checked={settings.wordWrap}
-                onCheckedChange={(checked) => updateSetting("wordWrap", checked)}
-              />
-            </div>
-
-            <div className="space-y-4 p-6 bg-[#252526] rounded-lg">
-              <Label htmlFor="font-size" className="text-[#cccccc] font-medium">
-                Font Size
-              </Label>
-              <Select
-                value={settings.fontSize.toString()}
-                onValueChange={(value) => updateSetting("fontSize", Number.parseInt(value))}
-              >
-                <SelectTrigger id="font-size" className="bg-[#3c3c3c] border-[#454545] text-[#cccccc] hover:border-[#656565] transition-colors cursor-pointer">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-[#252526] border-[#454545] text-[#cccccc]">
-                  <SelectItem value="12" className="cursor-pointer">12px</SelectItem>
-                  <SelectItem value="14" className="cursor-pointer">14px</SelectItem>
-                  <SelectItem value="16" className="cursor-pointer">16px</SelectItem>
-                  <SelectItem value="18" className="cursor-pointer">18px</SelectItem>
-                  <SelectItem value="20" className="cursor-pointer">20px</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-
-            <div className="space-y-4 p-6 bg-[#252526] rounded-lg">
-              <Label htmlFor="tab-size" className="text-[#cccccc] font-medium">
-                Tab Size
-              </Label>
-              <Select
-                value={settings.tabSize.toString()}
-                onValueChange={(value) => updateSetting("tabSize", Number.parseInt(value))}
-              >
-                <SelectTrigger id="tab-size" className="bg-[#3c3c3c] border-[#454545] text-[#cccccc] hover:border-[#656565] transition-colors cursor-pointer">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent className="bg-[#252526] border-[#454545] text-[#cccccc]">
-                  <SelectItem value="2" className="cursor-pointer">2 spaces</SelectItem>
-                  <SelectItem value="4" className="cursor-pointer">4 spaces</SelectItem>
-                  <SelectItem value="8" className="cursor-pointer">8 spaces</SelectItem>
-                </SelectContent>
-              </Select>
             </div>
           </div>
 
-          {/* About */}
-          <div className="space-y-4 pt-4 border-t border-[#454545]">
-            <div className="flex items-center gap-2 mb-2">
-              <div className="h-1 w-1 rounded-full bg-[#0e639c]"></div>
-              <h3 className="text-sm font-semibold text-foreground uppercase tracking-wide">About</h3>
+          {/* Typography */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-indigo-400">
+              <Terminal className="h-3.5 w-3.5" />
+              <span>Typography & Indentation</span>
             </div>
-            <div className="p-6 bg-[#252526] rounded-lg space-y-2">
-              <p className="text-sm text-[#cccccc] font-medium">Nyeya CodeBox v1.0.0</p>
-              <p className="text-xs text-[#858585]">A web-based code editor for HTML, CSS, and JavaScript</p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div className="p-3.5 rounded-xl bg-[#121215] border border-white/[0.06] space-y-2">
+                <Label htmlFor="font-size" className="text-xs font-semibold text-white">Font Size</Label>
+                <Select
+                  value={settings.fontSize.toString()}
+                  onValueChange={(val) => updateSetting("fontSize", parseInt(val))}
+                >
+                  <SelectTrigger id="font-size" className="bg-[#18181b] border-white/[0.1] text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-[#18181b] border-white/[0.1] text-zinc-200">
+                    <SelectItem value="12">12 px</SelectItem>
+                    <SelectItem value="13">13 px</SelectItem>
+                    <SelectItem value="14">14 px (Default)</SelectItem>
+                    <SelectItem value="16">16 px</SelectItem>
+                    <SelectItem value="18">18 px</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="p-3.5 rounded-xl bg-[#121215] border border-white/[0.06] space-y-2">
+                <Label htmlFor="tab-size" className="text-xs font-semibold text-white">Tab Spacing</Label>
+                <Select
+                  value={settings.tabSize.toString()}
+                  onValueChange={(val) => updateSetting("tabSize", parseInt(val))}
+                >
+                  <SelectTrigger id="tab-size" className="bg-[#18181b] border-white/[0.1] text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent className="bg-[#18181b] border-white/[0.1] text-zinc-200">
+                    <SelectItem value="2">2 Spaces (Standard)</SelectItem>
+                    <SelectItem value="4">4 Spaces</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
+          </div>
+
+          {/* About Nyeya CodeBox */}
+          <div className="p-4 rounded-xl bg-gradient-to-r from-indigo-500/10 via-purple-500/10 to-cyan-500/10 border border-indigo-500/20 flex items-center justify-between">
+            <div>
+              <p className="text-xs font-bold text-white">Nyeya CodeBox v2.0</p>
+              <p className="text-[11px] text-zinc-400">Next-Gen Browser Cloud IDE & Web Sandbox</p>
+            </div>
+            <span className="text-[10px] px-2 py-0.5 rounded bg-indigo-500/20 text-indigo-300 font-mono font-bold">
+              Release 2026
+            </span>
           </div>
         </div>
 
-        <div className="flex-none flex items-center justify-end gap-3 px-6 py-4 border-t border-[#454545] bg-[#2d2d2d]">
-          <Button onClick={onClose} className="bg-[#0e639c] hover:bg-[#1177bb] text-white px-6 cursor-pointer transition-all">
+        <div className="px-6 py-3 border-t border-white/[0.08] bg-[#121215] flex justify-end">
+          <Button onClick={onClose} className="bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold px-5">
             Done
           </Button>
         </div>
-      </div>
-    </div>
+      </DialogContent>
+    </Dialog>
   )
 }
