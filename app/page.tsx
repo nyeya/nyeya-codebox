@@ -1,31 +1,37 @@
 "use client"
 
-import { useState, useEffect, useCallback } from "react"
+import React, { useState, useEffect, useCallback } from "react"
 import { useTheme } from "next-themes"
+import { PanelGroup, Panel, PanelResizeHandle } from "react-resizable-panels"
+import { ActivityBar, type ActiveDrawer } from "@/components/activity-bar"
+import { TopNavigation } from "@/components/top-navigation"
+import { StatusBar } from "@/components/status-bar"
 import { FileExplorer } from "@/components/file-explorer"
 import { CodeEditor } from "@/components/code-editor"
 import { PreviewPanel } from "@/components/preview-panel"
 import { ConsolePanel } from "@/components/console-panel"
-import { TopNavigation } from "@/components/top-navigation"
 import { TemplateSelector } from "@/components/template-selector"
-import { AssetManager } from "@/components/asset-manager"
 import { LibraryManager } from "@/components/library-manager"
-import { CodeFormatter } from "@/components/code-formatter"
+import { AssetManager } from "@/components/asset-manager"
+import { SnippetsManager } from "@/components/snippets-manager"
 import { SettingsPanel } from "@/components/settings-panel"
+import { ShortcutsModal } from "@/components/shortcuts-modal"
+import { CommandPalette } from "@/components/command-palette"
 import { useFileSystem } from "@/hooks/use-file-system"
 import { useConsole } from "@/hooks/use-console"
 import { detectLanguage } from "@/lib/language-detector"
-import { exportProject, generateShareableLink } from "@/lib/export-project"
+import {
+  exportProject,
+  exportStandaloneHTML,
+  importProjectFromZip,
+  generateShareableLink,
+  decodeShareableLink,
+  formatCode,
+  type Library,
+} from "@/lib/export-project"
 import type { ProjectTemplate } from "@/lib/templates"
 import type { FileNode } from "@/types/file-system"
-import { PanelGroup, Panel, PanelResizeHandle } from "react-resizable-panels"
-
-interface Library {
-  name: string
-  url: string
-  type: "css" | "js"
-  description: string
-}
+import { toast } from "sonner"
 
 export default function Home() {
   const {
@@ -47,298 +53,365 @@ export default function Home() {
 
   const [projectName, setProjectName] = useState("My Project")
   const [layout, setLayout] = useState<"split" | "editor" | "preview">("split")
-  const [showTemplateSelector, setShowTemplateSelector] = useState(true)
+  const [activeDrawer, setActiveDrawer] = useState<ActiveDrawer>("explorer")
+  const [showConsole, setShowConsole] = useState(true)
   const [externalLibraries, setExternalLibraries] = useState<Library[]>([])
   const { theme, setTheme } = useTheme()
+
+  // Modals
+  const [showTemplateSelector, setShowTemplateSelector] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
-  const [showFilePane, setShowFilePane] = useState(true)
-  const [showConsole, setShowConsole] = useState(true)
+  const [showShortcuts, setShowShortcuts] = useState(false)
+  const [showCommandPalette, setShowCommandPalette] = useState(false)
+  const [isDirty, setIsDirty] = useState(false)
+
+  // Cursor tracking
+  const [lineCol, setLineCol] = useState({ line: 1, col: 1 })
+
+  // Settings
   const [settings, setSettings] = useState({
     autoSave: true,
     autoFormat: false,
     fontSize: 14,
     tabSize: 2,
     wordWrap: true,
-    editorTheme: "vs-dark",
+    editorTheme: "obsidian-dark",
   })
 
-
-  useEffect(() => {
-    const savedSettings = localStorage.getItem("nyeya-codebox-settings")
-    if (savedSettings) {
-      try {
-        const parsed = JSON.parse(savedSettings)
-        setSettings(parsed)
-      } catch (error) {
-        // Failed to load settings, using defaults
-      }
-    }
-  }, [])
-
-  useEffect(() => {
-    localStorage.setItem("nyeya-codebox-settings", JSON.stringify(settings))
-  }, [settings])
-
+  // Load Settings on mount
   useEffect(() => {
     try {
-      const saved = localStorage.getItem("nyeya-codebox-project")
-      if (saved) {
-        const data = JSON.parse(saved)
-        if (data.files) {
-          loadFiles(data.files)
-          setProjectName(data.name || "My Project")
-          setExternalLibraries(data.libraries || [])
-          setShowTemplateSelector(false)
-          addMessage("Project loaded from previous session", "info")
-        }
+      const savedSettings = localStorage.getItem("nyeya-codebox-settings")
+      if (savedSettings) {
+        setSettings(JSON.parse(savedSettings))
       }
-    } catch (error) {
-      // Failed to load saved project
-    }
+    } catch {}
   }, [])
 
+  // Persist Settings
+  useEffect(() => {
+    try {
+      localStorage.setItem("nyeya-codebox-settings", JSON.stringify(settings))
+    } catch {}
+  }, [settings])
+
+  // Hydrate from URL query or LocalStorage
+  useEffect(() => {
+    if (typeof window !== "undefined") {
+      const decoded = decodeShareableLink(window.location.search)
+      if (decoded && decoded.files && decoded.files.length > 0) {
+        loadFiles(decoded.files)
+        setProjectName(decoded.name || "Shared Project")
+        setExternalLibraries(decoded.libraries || [])
+        toast.success(`Loaded project "${decoded.name}" from share link!`)
+        addMessage(`Loaded project from share link`, "info")
+        return
+      }
+
+      // Otherwise load from LocalStorage
+      try {
+        const saved = localStorage.getItem("nyeya-codebox-project")
+        if (saved) {
+          const data = JSON.parse(saved)
+          if (data.files && data.files.length > 0) {
+            loadFiles(data.files)
+            setProjectName(data.name || "My Project")
+            setExternalLibraries(data.libraries || [])
+            addMessage("Project restored from previous session", "info")
+          }
+        }
+      } catch {}
+    }
+  }, [loadFiles, addMessage])
+
+  // Auto-save every 30s
   useEffect(() => {
     if (!settings.autoSave) return
 
     const interval = setInterval(() => {
       try {
-        // Filter out asset files to prevent quota exceeded errors
         const filterAssets = (nodes: FileNode[]): FileNode[] => {
-          return nodes.map(node => {
-            if (node.type === "folder" && node.children) {
-              // Skip the entire assets folder
-              if (node.path === "/assets") {
-                return { ...node, children: [] }
+          return nodes
+            .map((node) => {
+              if (node.type === "folder" && node.children) {
+                if (node.path === "/assets") return { ...node, children: [] }
+                return { ...node, children: filterAssets(node.children) }
               }
-              return { ...node, children: filterAssets(node.children) }
-            }
-            // Skip individual asset files
-            if (node.path.startsWith("/assets/")) {
-              return null
-            }
-            return node
-          }).filter((node): node is FileNode => node !== null)
+              if (node.path.startsWith("/assets/")) return null
+              return node
+            })
+            .filter((n): n is FileNode => n !== null)
         }
 
         const filesToSave = filterAssets(files)
-        
         localStorage.setItem(
           "nyeya-codebox-project",
-          JSON.stringify({ name: projectName, files: filesToSave, activeFile, openFiles, libraries: externalLibraries }),
+          JSON.stringify({
+            name: projectName,
+            files: filesToSave,
+            activeFile,
+            openFiles,
+            libraries: externalLibraries,
+          })
         )
-      } catch (error) {
-        // Auto-save failed
-      }
+        setIsDirty(false)
+      } catch {}
     }, 30000)
 
     return () => clearInterval(interval)
   }, [projectName, files, activeFile, openFiles, externalLibraries, settings.autoSave])
 
+  // Global Keyboard Shortcuts
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
-      // Ctrl+S or Cmd+S to save
-      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+      // Ctrl+K or Cmd+K -> Command Palette
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault()
+        setShowCommandPalette((prev) => !prev)
+      }
+
+      // Ctrl+/ or Cmd+/ -> Shortcuts Modal
+      if ((e.ctrlKey || e.metaKey) && e.key === "/") {
+        e.preventDefault()
+        setShowShortcuts((prev) => !prev)
+      }
+
+      // Ctrl+S or Cmd+S -> Save
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
         e.preventDefault()
         handleSave()
       }
-      // Ctrl+Shift+E or Cmd+Shift+E to export
-      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === "e") {
+
+      // Ctrl+Enter or Cmd+Enter -> Run
+      if ((e.ctrlKey || e.metaKey) && e.key === "Enter") {
         e.preventDefault()
-        handleExport()
+        handleRun()
+      }
+
+      // Shift+Alt+F -> Format
+      if (e.shiftKey && e.altKey && e.key.toLowerCase() === "f") {
+        e.preventDefault()
+        handleFormatCode()
+      }
+
+      // Ctrl+B or Cmd+B -> Toggle Drawer
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+        e.preventDefault()
+        setActiveDrawer((prev) => (prev ? null : "explorer"))
       }
     }
 
     window.addEventListener("keydown", handleKeyDown)
     return () => window.removeEventListener("keydown", handleKeyDown)
-  }, [projectName, files, externalLibraries])
+  }, [files, projectName, externalLibraries, activeFile, settings])
 
-
-  const handleFileContentChange = useCallback((content: string, filePath: string) => {
-    // Update the specific file that changed (not activeFile which can be stale)
-    updateFile(filePath, content)
-  }, [updateFile])
+  const handleFileContentChange = useCallback(
+    (content: string, filePath: string) => {
+      updateFile(filePath, content)
+      setIsDirty(true)
+    },
+    [updateFile]
+  )
 
   const handleSave = () => {
     try {
-      // Filter out asset files to prevent quota exceeded errors
+      if (settings.autoFormat && activeFile) {
+        handleFormatCode()
+      }
+
       const filterAssets = (nodes: FileNode[]): FileNode[] => {
-        return nodes.map(node => {
-          if (node.type === "folder" && node.children) {
-            if (node.path === "/assets") {
-              return { ...node, children: [] }
+        return nodes
+          .map((node) => {
+            if (node.type === "folder" && node.children) {
+              if (node.path === "/assets") return { ...node, children: [] }
+              return { ...node, children: filterAssets(node.children) }
             }
-            return { ...node, children: filterAssets(node.children) }
-          }
-          if (node.path.startsWith("/assets/")) {
-            return null
-          }
-          return node
-        }).filter((node): node is FileNode => node !== null)
+            if (node.path.startsWith("/assets/")) return null
+            return node
+          })
+          .filter((n): n is FileNode => n !== null)
       }
 
       const filesToSave = filterAssets(files)
-      
       localStorage.setItem(
         "nyeya-codebox-project",
-        JSON.stringify({ name: projectName, files: filesToSave, activeFile, openFiles, libraries: externalLibraries }),
+        JSON.stringify({
+          name: projectName,
+          files: filesToSave,
+          activeFile,
+          openFiles,
+          libraries: externalLibraries,
+        })
       )
-      addMessage("Project saved successfully! (Note: Assets are not persisted)", "info")
+      setIsDirty(false)
+      toast.success("Project snapshot saved successfully!")
+      addMessage("Project snapshot saved", "info")
     } catch (error) {
-      addMessage("Failed to save project: " + (error instanceof Error ? error.message : "Unknown error"), "error")
+      toast.error("Failed to save project")
     }
   }
 
-  const handleExport = async () => {
-    addMessage("Exporting project...", "info")
+  const handleRun = () => {
+    clearMessages()
+    addMessage("Sandbox re-rendered", "info")
+    toast.success("Live preview refreshed!")
+  }
+
+  const handleFormatCode = () => {
+    if (!activeFile) return
+    const content = getActiveFileContent()
+    const lang = detectLanguage(activeFile)
+    const formatted = formatCode(content, lang)
+    updateFile(activeFile, formatted)
+    toast.success(`Formatted ${activeFile.split("/").pop()}`)
+    addMessage(`Formatted ${activeFile}`, "info")
+  }
+
+  const handleExportZip = async () => {
+    toast.info("Bundling ZIP archive...")
     await exportProject(files, projectName, externalLibraries)
-    addMessage("Project exported successfully!", "info")
+    toast.success("ZIP archive exported!")
+    addMessage("Exported ZIP package", "info")
+  }
+
+  const handleExportHTML = () => {
+    toast.info("Generating standalone HTML bundle...")
+    exportStandaloneHTML(files, projectName, externalLibraries)
+    toast.success("Standalone HTML exported!")
+    addMessage("Exported standalone HTML bundle", "info")
+  }
+
+  const handleImportZip = async (file: File) => {
+    try {
+      toast.info(`Importing ${file.name}...`)
+      const result = await importProjectFromZip(file)
+      if (result.files.length > 0) {
+        loadFiles(result.files)
+        setProjectName(result.name)
+        toast.success(`Imported ${result.files.length} files from ${file.name}`)
+        addMessage(`Project imported from ${file.name}`, "info")
+      }
+    } catch (err) {
+      toast.error("Failed to read ZIP archive")
+    }
   }
 
   const handleShare = () => {
-    const link = generateShareableLink(files, projectName)
+    const link = generateShareableLink(files, projectName, externalLibraries)
     navigator.clipboard.writeText(link).then(() => {
-      addMessage("Share link copied to clipboard!", "info")
+      toast.success("Compressed share link copied to clipboard!")
+      addMessage("Generated share link", "info")
     })
   }
 
-  const handleFork = () => {
-    const newName = `${projectName} (Fork)`
-    setProjectName(newName)
-    addMessage(`Project forked as "${newName}"!`, "info")
-  }
-
-  const handleRun = () => {
-    addMessage("Running project...", "info")
-    clearMessages()
-  }
-
   const handleNewProject = () => {
-    if (confirm("Are you sure you want to start a new project? Unsaved changes will be lost.")) {
+    if (confirm("Start a new clean project? Unsaved changes in the current session will be replaced.")) {
       resetFiles()
       setProjectName("My Project")
       setExternalLibraries([])
       clearMessages()
-      localStorage.removeItem("nyeya-codebox")
-      addMessage("New project created", "info")
-    }
-  }
-
-  const handleOpenTemplates = () => {
-    setShowTemplateSelector(true)
-  }
-
-  const handleAssetAdd = (path: string, content: string, type: string) => {
-    // Ensure /assets folder exists
-    const assetsFolder = files.find(f => f.path === "/assets" && f.type === "folder")
-    if (!assetsFolder) {
-      createFile("/", "assets", "folder")
-    }
-    
-    // Create the asset file with content
-    const fileName = path.split("/").pop() || "asset"
-    createFile("/assets", fileName, "file", content)
-    
-    addMessage(`Asset added: ${path}`, "info")
-  }
-
-  const handleLibraryAdd = (library: Library) => {
-    setExternalLibraries((prev) => [...prev, library])
-    addMessage(`Library added: ${library.name}`, "info")
-  }
-
-  const handleLibraryRemove = (url: string) => {
-    setExternalLibraries((prev) => prev.filter((lib) => lib.url !== url))
-    addMessage("Library removed", "info")
-  }
-
-  const handleCodeFormat = (formattedCode: string) => {
-    if (activeFile) {
-      updateFile(activeFile, formattedCode)
-      addMessage("Code formatted successfully!", "info")
+      localStorage.removeItem("nyeya-codebox-project")
+      toast.success("New project started!")
+      addMessage("Initialized new project", "info")
     }
   }
 
   const handleTemplateSelect = (template: ProjectTemplate) => {
     loadFiles(template.files)
-
-    // Set the first HTML file as active
     const htmlFile = template.files.find((f) => f.name === "index.html")
     if (htmlFile) {
       setActiveFile(htmlFile.path)
     }
-
     setProjectName(template.name)
-    addMessage(`Loaded ${template.name} template`, "info")
+    toast.success(`Loaded "${template.name}" starter template!`)
+    addMessage(`Template "${template.name}" loaded`, "info")
     setShowTemplateSelector(false)
   }
 
-  const handleToggleTheme = () => {
-    setTheme((prev) => (prev === "dark" ? "light" : "dark"))
-    addMessage(`Switched to ${theme === "dark" ? "light" : "dark"} theme`, "info")
+  const handleAssetAdd = (path: string, content: string, type: string) => {
+    const assetsFolder = files.find((f) => f.path === "/assets" && f.type === "folder")
+    if (!assetsFolder) {
+      createFile("/", "assets", "folder")
+    }
+    const fileName = path.split("/").pop() || "asset"
+    createFile("/assets", fileName, "file", content)
+    addMessage(`Asset loaded: ${path}`, "info")
   }
 
-  const handleOpenSettings = () => {
-    setShowSettings(true)
+  const handleLibraryAdd = (library: Library) => {
+    setExternalLibraries((prev) => [...prev, library])
+    addMessage(`Injected CDN package: ${library.name}`, "info")
   }
 
-  const handleSettingsChange = (newSettings: typeof settings) => {
-    setSettings(newSettings)
-    addMessage("Settings updated", "info")
+  const handleLibraryRemove = (url: string) => {
+    setExternalLibraries((prev) => prev.filter((lib) => lib.url !== url))
+    addMessage("Removed CDN package", "info")
   }
 
-  const handleToggleFilePane = () => {
-    setShowFilePane((prev) => !prev)
+  const handleInsertSnippet = (code: string) => {
+    if (activeFile) {
+      const current = getActiveFileContent()
+      updateFile(activeFile, current + "\n\n" + code)
+      setIsDirty(true)
+    }
   }
 
-  const handleToggleConsole = () => {
-    setShowConsole((prev) => !prev)
+  const handleEvalREPL = (expression: string) => {
+    const iframes = document.querySelectorAll("iframe")
+    iframes.forEach((iframe) => {
+      iframe.contentWindow?.postMessage({ type: "eval-repl", expression }, "*")
+    })
   }
 
   const activeFileContent = getActiveFileContent()
   const activeFileLanguage = activeFile ? detectLanguage(activeFile) : "javascript"
+  const errorCount = messages.filter((m) => m.type === "error").length
+  const warnCount = messages.filter((m) => m.type === "warn").length
 
   return (
-    <div className="h-screen flex flex-col bg-[#1e1e1e]">
+    <div className="h-screen flex flex-col bg-[#09090b] text-[#f4f4f5] overflow-hidden select-none">
+      {/* Top Header Navigation */}
       <TopNavigation
         projectName={projectName}
         onProjectNameChange={setProjectName}
         onSave={handleSave}
-        onExport={handleExport}
+        onExportZip={handleExportZip}
+        onExportHTML={handleExportHTML}
+        onImportZip={handleImportZip}
         onShare={handleShare}
-        onFork={handleFork}
         onRun={handleRun}
+        onFormat={handleFormatCode}
         onLayoutChange={setLayout}
         currentLayout={layout}
         onNewProject={handleNewProject}
-        onOpenTemplates={handleOpenTemplates}
-        onToggleTheme={handleToggleTheme}
-        theme={theme}
-        onOpenSettings={handleOpenSettings}
-        showFilePane={showFilePane}
-        onToggleFilePane={handleToggleFilePane}
-        showConsole={showConsole}
-        onToggleConsole={handleToggleConsole}
+        onOpenTemplates={() => setShowTemplateSelector(true)}
+        onOpenSettings={() => setShowSettings(true)}
+        onOpenCommandPalette={() => setShowCommandPalette(true)}
+        onOpenShortcuts={() => setShowShortcuts(true)}
+        isDirty={isDirty}
       />
 
-      <div className="flex-1 overflow-hidden">
-        <PanelGroup direction="horizontal">
-          {/* File Explorer */}
-          {showFilePane && (
-            <>
-              <Panel defaultSize={15} minSize={10} maxSize={30}>
-                <div className="h-full flex flex-col">
-                  <div className="px-2 py-2 border-b border-[#2d2d2d] space-y-2">
-                    <AssetManager onAssetAdd={handleAssetAdd} />
-                    <LibraryManager
-                      onLibraryAdd={handleLibraryAdd}
-                      addedLibraries={externalLibraries}
-                      onLibraryRemove={handleLibraryRemove}
-                    />
-                    {activeFile && (
-                      <CodeFormatter code={activeFileContent} language={activeFileLanguage} onFormat={handleCodeFormat} />
-                    )}
-                  </div>
-                  <div className="flex-1 overflow-hidden">
+      {/* Main Studio Area */}
+      <div className="flex-1 flex overflow-hidden">
+        {/* Left Activity Bar */}
+        <ActivityBar
+          activeDrawer={activeDrawer}
+          onSelectDrawer={setActiveDrawer}
+          onOpenSettings={() => setShowSettings(true)}
+          onOpenShortcuts={() => setShowShortcuts(true)}
+          theme={theme}
+          onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+          addedLibrariesCount={externalLibraries.length}
+        />
+
+        {/* Studio Workspace Resizable Panels */}
+        <div className="flex-1 overflow-hidden">
+          <PanelGroup direction="horizontal">
+            {/* Left Dynamic Drawer */}
+            {activeDrawer !== null && (
+              <>
+                <Panel defaultSize={20} minSize={14} maxSize={35} className="h-full bg-[#121215]">
+                  {activeDrawer === "explorer" && (
                     <FileExplorer
                       files={files}
                       activeFile={activeFile}
@@ -347,66 +420,117 @@ export default function Home() {
                       onFileDelete={removeFile}
                       onFileRename={renameFile}
                     />
-                  </div>
-                </div>
-              </Panel>
+                  )}
+                  {activeDrawer === "templates" && (
+                    <div className="h-full flex flex-col p-3 overflow-y-auto space-y-2">
+                      <span className="text-xs font-bold uppercase tracking-wider text-zinc-400 p-2">
+                        Templates Showcase
+                      </span>
+                      <button
+                        onClick={() => setShowTemplateSelector(true)}
+                        className="w-full p-4 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-left hover:bg-indigo-600/30 transition-all text-xs font-semibold text-indigo-300"
+                      >
+                        ⚡ Open Full Templates Gallery →
+                      </button>
+                    </div>
+                  )}
+                  {activeDrawer === "libraries" && (
+                    <LibraryManager
+                      onLibraryAdd={handleLibraryAdd}
+                      addedLibraries={externalLibraries}
+                      onLibraryRemove={handleLibraryRemove}
+                    />
+                  )}
+                  {activeDrawer === "assets" && (
+                    <AssetManager onAssetAdd={handleAssetAdd} />
+                  )}
+                  {activeDrawer === "snippets" && (
+                    <SnippetsManager onInsertCode={handleInsertSnippet} />
+                  )}
+                </Panel>
 
-              <PanelResizeHandle className="w-1 bg-[#2d2d2d] hover:bg-[#007acc] transition-colors" />
-            </>
-          )}
+                <PanelResizeHandle className="w-1 bg-white/[0.06] hover:bg-indigo-500 transition-colors" />
+              </>
+            )}
 
-          {/* Main Content Area */}
-          <Panel defaultSize={85}>
-            <PanelGroup direction="vertical">
-              {/* Editor and Preview */}
-              <Panel defaultSize={70} minSize={30}>
-                <PanelGroup direction="horizontal">
-                  {/* Code Editor */}
-                  {(layout === "split" || layout === "editor") && (
-                    <>
-                      <Panel defaultSize={layout === "editor" ? 100 : 50} minSize={30}>
-                        <CodeEditor
-                          value={activeFileContent}
-                          onChange={handleFileContentChange}
-                          language={activeFileLanguage}
-                          path={activeFile || ""}
-                          openFiles={openFiles}
-                          activeFile={activeFile}
-                          onFileSelect={setActiveFile}
-                          onFileClose={closeFile}
-                          settings={settings}
+            {/* Central Editor, Preview & Console Area */}
+            <Panel defaultSize={activeDrawer !== null ? 80 : 100}>
+              <PanelGroup direction="vertical">
+                {/* Editor & Preview Row */}
+                <Panel defaultSize={showConsole ? 70 : 100} minSize={25}>
+                  <PanelGroup direction="horizontal">
+                    {/* Code Editor */}
+                    {(layout === "split" || layout === "editor") && (
+                      <>
+                        <Panel defaultSize={layout === "editor" ? 100 : 50} minSize={25}>
+                          <CodeEditor
+                            value={activeFileContent}
+                            onChange={handleFileContentChange}
+                            language={activeFileLanguage}
+                            path={activeFile || ""}
+                            openFiles={openFiles}
+                            activeFile={activeFile}
+                            onFileSelect={setActiveFile}
+                            onFileClose={closeFile}
+                            onNewFile={() => createFile("/", "index.js", "file")}
+                            onFormat={handleFormatCode}
+                            settings={settings}
+                          />
+                        </Panel>
+                        {layout === "split" && (
+                          <PanelResizeHandle className="w-1 bg-white/[0.06] hover:bg-indigo-500 transition-colors" />
+                        )}
+                      </>
+                    )}
+
+                    {/* Live Preview Panel */}
+                    {(layout === "split" || layout === "preview") && (
+                      <Panel defaultSize={layout === "preview" ? 100 : 50} minSize={25}>
+                        <PreviewPanel
+                          files={files}
+                          onConsoleLog={addMessage}
+                          externalLibraries={externalLibraries}
                         />
                       </Panel>
-                      {layout === "split" && (
-                        <PanelResizeHandle className="w-1 bg-[#2d2d2d] hover:bg-[#007acc] transition-colors" />
-                      )}
-                    </>
-                  )}
+                    )}
+                  </PanelGroup>
+                </Panel>
 
-                  {/* Preview */}
-                  {(layout === "split" || layout === "preview") && (
-                    <Panel defaultSize={layout === "preview" ? 100 : 50} minSize={30}>
-                      <PreviewPanel files={files} onConsoleLog={addMessage} externalLibraries={externalLibraries} />
+                {/* DevTools Console Panel */}
+                {showConsole && (
+                  <>
+                    <PanelResizeHandle className="h-1 bg-white/[0.06] hover:bg-indigo-500 transition-colors" />
+                    <Panel defaultSize={30} minSize={12} maxSize={50}>
+                      <ConsolePanel
+                        messages={messages}
+                        onClear={clearMessages}
+                        onEvalREPL={handleEvalREPL}
+                      />
                     </Panel>
-                  )}
-                </PanelGroup>
-              </Panel>
-
-              {showConsole && (
-                <>
-                  <PanelResizeHandle className="h-1 bg-[#2d2d2d] hover:bg-[#007acc] transition-colors" />
-
-                  {/* Console */}
-                  <Panel defaultSize={30} minSize={15} maxSize={50}>
-                    <ConsolePanel messages={messages} onClear={clearMessages} />
-                  </Panel>
-                </>
-              )}
-            </PanelGroup>
-          </Panel>
-        </PanelGroup>
+                  </>
+                )}
+              </PanelGroup>
+            </Panel>
+          </PanelGroup>
+        </div>
       </div>
 
+      {/* Bottom Status Bar */}
+      <StatusBar
+        activeFile={activeFile}
+        activeLanguage={activeFileLanguage}
+        errorCount={errorCount}
+        warnCount={warnCount}
+        showConsole={showConsole}
+        onToggleConsole={() => setShowConsole(!showConsole)}
+        currentLayout={layout}
+        onLayoutChange={setLayout}
+        lineCol={lineCol}
+        tabSize={settings.tabSize}
+        autoSave={settings.autoSave}
+      />
+
+      {/* Modals & Dialogs */}
       <TemplateSelector
         open={showTemplateSelector}
         onClose={() => setShowTemplateSelector(false)}
@@ -417,8 +541,34 @@ export default function Home() {
         open={showSettings}
         onClose={() => setShowSettings(false)}
         settings={settings}
-        onSettingsChange={handleSettingsChange}
+        onSettingsChange={setSettings}
+      />
+
+      <ShortcutsModal
+        open={showShortcuts}
+        onClose={() => setShowShortcuts(false)}
+      />
+
+      <CommandPalette
+        open={showCommandPalette}
+        onOpenChange={setShowCommandPalette}
+        files={files}
+        activeFile={activeFile}
+        onFileSelect={setActiveFile}
+        onRun={handleRun}
+        onSave={handleSave}
+        onExportZip={handleExportZip}
+        onExportHTML={handleExportHTML}
+        onShare={handleShare}
+        onFormat={handleFormatCode}
+        onNewProject={handleNewProject}
+        onSelectTemplate={handleTemplateSelect}
+        onLayoutChange={setLayout}
+        onToggleTheme={() => setTheme(theme === "dark" ? "light" : "dark")}
+        onOpenSettings={() => setShowSettings(true)}
+        onToggleConsole={() => setShowConsole(!showConsole)}
       />
     </div>
   )
 }
+
