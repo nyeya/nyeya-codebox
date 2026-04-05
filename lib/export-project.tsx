@@ -315,21 +315,25 @@ export function decodeShareableLink(searchParams: string): { name: string; files
 }
 
 /**
- * Format code using in-browser formatter rules
+ * Format code using safe in-browser formatting engine
  */
 export function formatCode(code: string, language: string): string {
   if (!code || !code.trim()) return code
 
   switch (language) {
     case "html":
+    case "htm":
       return formatHTML(code)
     case "css":
     case "scss":
     case "sass":
       return formatCSS(code)
+    case "json":
+      return formatJSON(code)
     case "javascript":
     case "typescript":
-    case "json":
+    case "jsx":
+    case "tsx":
       return formatJS(code)
     default:
       return code
@@ -340,7 +344,10 @@ function formatHTML(html: string): string {
   let formatted = ""
   let indent = 0
   const tab = "  "
-  const tokens = html.replace(/>\s*</g, "><").split(/(?=[<])|(?<=>)/g)
+  
+  // Normalize self-closing tags and clean up spacing between tags
+  const clean = html.trim().replace(/>\s*</g, "><")
+  const tokens = clean.split(/(?=[<])|(?<=>)/g)
 
   for (let i = 0; i < tokens.length; i++) {
     const token = tokens[i].trim()
@@ -363,36 +370,83 @@ function formatHTML(html: string): string {
 }
 
 function isVoidTag(tag: string): boolean {
-  const match = tag.match(/<(\w+)/)
+  const match = tag.match(/<([a-zA-Z0-9-]+)/)
   if (!match) return false
   const name = match[1].toLowerCase()
   return ["area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"].includes(name)
 }
 
 function formatCSS(css: string): string {
-  return css
-    .replace(/\s*\{\s*/g, " {\n  ")
-    .replace(/;\s*/g, ";\n  ")
-    .replace(/\s*\}\s*/g, "\n}\n\n")
-    .replace(/\n\s*\n\s*\n/g, "\n\n")
-    .trim()
+  let indent = 0
+  const tab = "  "
+  const lines = css
+    .replace(/\{/g, " {\n")
+    .replace(/\}/g, "\n}\n")
+    .replace(/;/g, ";\n")
+    .split("\n")
+
+  const result: string[] = []
+  for (let line of lines) {
+    line = line.trim()
+    if (!line) continue
+
+    if (line.startsWith("}")) {
+      indent = Math.max(0, indent - 1)
+    }
+
+    result.push(tab.repeat(indent) + line)
+
+    if (line.endsWith("{")) {
+      indent++
+    }
+  }
+
+  return result.join("\n").replace(/\n\s*\n\s*\n/g, "\n\n").trim()
+}
+
+function formatJSON(json: string): string {
+  try {
+    const parsed = JSON.parse(json)
+    return JSON.stringify(parsed, null, 2)
+  } catch {
+    return json
+  }
 }
 
 function formatJS(js: string): string {
-  try {
-    // If it's JSON, pretty print it
-    if (js.trim().startsWith("{") || js.trim().startsWith("[")) {
+  // If valid JSON, pretty print
+  if (js.trim().startsWith("{") || js.trim().startsWith("[")) {
+    try {
       const parsed = JSON.parse(js)
       return JSON.stringify(parsed, null, 2)
-    }
-  } catch {}
+    } catch {}
+  }
 
-  // Clean JS basic formatting
-  return js
-    .replace(/\{\s*/g, " {\n  ")
-    .replace(/;\s*/g, ";\n")
-    .replace(/\}\s*/g, "\n}\n")
-    .replace(/\n\s*\n\s*\n/g, "\n\n")
-    .trim()
+  let indent = 0
+  const tab = "  "
+  const lines = js
+    .replace(/\{/g, " {\n")
+    .replace(/\}/g, "\n}\n")
+    .replace(/;/g, ";\n")
+    .split("\n")
+
+  const result: string[] = []
+  for (let line of lines) {
+    line = line.trim()
+    if (!line) continue
+
+    if (line.startsWith("}") || line.startsWith("]")) {
+      indent = Math.max(0, indent - 1)
+    }
+
+    result.push(tab.repeat(indent) + line)
+
+    if (line.endsWith("{") || line.endsWith("[")) {
+      indent++
+    }
+  }
+
+  return result.join("\n").replace(/\n\s*\n\s*\n/g, "\n\n").trim()
 }
+
 
