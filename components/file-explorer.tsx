@@ -10,12 +10,12 @@ import {
   Trash2,
   Edit2,
   Copy,
-  Upload,
+  Download,
   Folder,
   FolderOpen,
   FileCode,
-  FileSpreadsheet,
-  FileText
+  FileText,
+  ChevronsUpDown
 } from "lucide-react"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuTrigger, ContextMenuSeparator } from "@/components/ui/context-menu"
 import { Input } from "@/components/ui/input"
@@ -45,10 +45,11 @@ export function FileExplorer({
 
   const handleRootCreate = () => {
     if (newItemName.trim() && isCreatingInRoot) {
-      onFileCreate("/", newItemName.trim(), isCreatingInRoot)
+      const name = newItemName.trim()
+      onFileCreate("/", name, isCreatingInRoot)
       setNewItemName("")
       setIsCreatingInRoot(null)
-      toast.success(`Created ${newItemName.trim()}`)
+      toast.success(`Created ${name}`)
     } else {
       setIsCreatingInRoot(null)
     }
@@ -175,6 +176,27 @@ function FileTree({
     }
   }
 
+  const downloadIndividualFile = (file: FileNode) => {
+    if (file.content === undefined) return
+    const isData = file.content.startsWith("data:")
+    let url = ""
+    if (isData) {
+      url = file.content
+    } else {
+      const blob = new Blob([file.content], { type: "text/plain;charset=utf-8" })
+      url = URL.createObjectURL(blob)
+    }
+
+    const a = document.createElement("a")
+    a.href = url
+    a.download = file.name
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    if (!isData) URL.revokeObjectURL(url)
+    toast.success(`Downloaded ${file.name}`)
+  }
+
   const getFileIcon = (fileName: string) => {
     const ext = fileName.split(".").pop()?.toLowerCase() || ""
     switch (ext) {
@@ -285,6 +307,43 @@ function FileTree({
                     <ContextMenuSeparator className="bg-white/[0.08] my-1" />
                   </>
                 )}
+
+                {/* Duplicate file */}
+                {!isFolder && onFileDuplicate && (
+                  <ContextMenuItem
+                    onClick={() => {
+                      onFileDuplicate(file.path)
+                      toast.success(`Duplicated ${file.name}`)
+                    }}
+                    className="gap-2 cursor-pointer hover:bg-white/[0.08] rounded-lg"
+                  >
+                    <Copy className="h-3.5 w-3.5 text-cyan-400" />
+                    <span>Duplicate</span>
+                  </ContextMenuItem>
+                )}
+
+                {/* Download file */}
+                {!isFolder && (
+                  <ContextMenuItem
+                    onClick={() => downloadIndividualFile(file)}
+                    className="gap-2 cursor-pointer hover:bg-white/[0.08] rounded-lg"
+                  >
+                    <Download className="h-3.5 w-3.5 text-blue-400" />
+                    <span>Download File</span>
+                  </ContextMenuItem>
+                )}
+
+                {/* Copy path */}
+                <ContextMenuItem
+                  onClick={() => {
+                    navigator.clipboard.writeText(file.path)
+                    toast.success(`Copied path: ${file.path}`)
+                  }}
+                  className="gap-2 cursor-pointer hover:bg-white/[0.08] rounded-lg"
+                >
+                  <Copy className="h-3.5 w-3.5 text-zinc-400" />
+                  <span>Copy Path</span>
+                </ContextMenuItem>
 
                 <ContextMenuItem
                   onClick={() => {
