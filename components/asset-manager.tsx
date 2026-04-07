@@ -1,38 +1,70 @@
 "use client"
 
 import React, { useState } from "react"
-import { Upload, X, Image as ImageIcon, Copy, Check, FileCode, FileSpreadsheet, Trash2 } from "lucide-react"
+import { Upload, X, Image as ImageIcon, Copy, Check, FileSpreadsheet, Trash2 } from "lucide-react"
 import { toast } from "sonner"
+import type { FileNode } from "@/types/file-system"
 
 interface AssetManagerProps {
+  files: FileNode[]
   onAssetAdd: (name: string, content: string, type: string) => void
+  onAssetDelete: (path: string) => void
 }
 
-export function AssetManager({ onAssetAdd }: AssetManagerProps) {
-  const [assets, setAssets] = useState<Array<{ name: string; url: string; type: string; size: string }>>([])
+export function AssetManager({ files, onAssetAdd, onAssetDelete }: AssetManagerProps) {
   const [isDragging, setIsDragging] = useState(false)
   const [copiedPath, setCopiedPath] = useState<string | null>(null)
 
-  const handleFileUpload = (files: FileList | null) => {
-    if (!files || files.length === 0) return
+  // Collect all media assets from the file system
+  const assetItems: Array<{ path: string; name: string; url: string; type: string; size: string }> = []
 
-    Array.from(files).forEach((file) => {
+  const collect = (nodes: FileNode[]) => {
+    nodes.forEach((node) => {
+      if (node.type === "file" && node.content !== undefined) {
+        const isMedia =
+          node.path.startsWith("/assets/") ||
+          node.content.startsWith("data:image/") ||
+          /\.(png|jpg|jpeg|gif|webp|svg|ico)$/i.test(node.name)
+
+        if (isMedia) {
+          const isSvg = node.name.endsWith(".svg")
+          const isData = node.content.startsWith("data:")
+          let displayUrl = node.content
+          if (!isData && isSvg) {
+            displayUrl = `data:image/svg+xml;utf8,${encodeURIComponent(node.content)}`
+          }
+
+          const sizeBytes = node.content.length
+          const sizeFormatted = `${(sizeBytes / 1024).toFixed(1)} KB`
+
+          assetItems.push({
+            path: node.path,
+            name: node.name,
+            url: displayUrl,
+            type: isSvg ? "image/svg+xml" : isData ? node.content.split(";")[0].replace("data:", "") : "image",
+            size: sizeFormatted,
+          })
+        }
+      }
+      if (node.children) {
+        collect(node.children)
+      }
+    })
+  }
+
+  collect(files)
+
+  const handleFileUpload = (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return
+
+    Array.from(fileList).forEach((file) => {
       const reader = new FileReader()
 
       reader.onload = (e) => {
         const content = e.target?.result as string
-        const sizeFormatted = `${(file.size / 1024).toFixed(1)} KB`
-
-        const asset = {
-          name: file.name,
-          url: content,
-          type: file.type || "application/octet-stream",
-          size: sizeFormatted,
-        }
-
-        setAssets((prev) => [...prev, asset])
-        onAssetAdd(`/assets/${file.name}`, content, file.type)
-        toast.success(`Uploaded ${file.name}`)
+        const cleanName = file.name.replace(/\s+/g, "_")
+        onAssetAdd(`/assets/${cleanName}`, content, file.type)
+        toast.success(`Uploaded ${cleanName}`)
       }
 
       if (file.type.startsWith("image/") || file.type.includes("svg")) {
@@ -49,19 +81,11 @@ export function AssetManager({ onAssetAdd }: AssetManagerProps) {
     handleFileUpload(e.dataTransfer.files)
   }
 
-  const removeAsset = (index: number) => {
-    setAssets((prev) => prev.filter((_, i) => i !== index))
-    toast.info("Asset removed from session")
-  }
-
-  const copySnippet = (name: string, type: string) => {
-    const path = `/assets/${name}`
-    let snippet = `<img src="${path}" alt="${name}" />`
-    if (type.endsWith("css")) {
-      snippet = `background-image: url('${path}');`
-    }
+  const copySnippet = (path: string, name: string) => {
+    const isSvg = name.endsWith(".svg")
+    const snippet = `<img src="${path}" alt="${name}" />`
     navigator.clipboard.writeText(snippet)
-    setCopiedPath(name)
+    setCopiedPath(path)
     toast.success(`Copied: ${snippet}`)
     setTimeout(() => setCopiedPath(null), 2000)
   }
@@ -74,9 +98,9 @@ export function AssetManager({ onAssetAdd }: AssetManagerProps) {
           <ImageIcon className="h-4 w-4 text-cyan-400" />
           <span className="text-sm font-bold text-white tracking-tight">Assets & Media Locker</span>
         </div>
-        {assets.length > 0 && (
+        {assetItems.length > 0 && (
           <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 font-bold border border-cyan-500/30">
-            {assets.length} Files
+            {assetItems.length} {assetItems.length === 1 ? "File" : "Files"}
           </span>
         )}
       </div>
@@ -98,7 +122,7 @@ export function AssetManager({ onAssetAdd }: AssetManagerProps) {
         >
           <Upload className="h-8 w-8 mx-auto mb-2 text-zinc-500" />
           <p className="text-xs font-semibold text-zinc-200 mb-1">Drag and drop images or media</p>
-          <p className="text-[11px] text-zinc-500 mb-4">PNG, JPG, SVG, WebP, GIF up to 5MB</p>
+          <p className="text-[11px] text-zinc-500 mb-4">PNG, JPG, SVG, WebP, GIF</p>
 
           <label className="cursor-pointer">
             <input
@@ -115,16 +139,16 @@ export function AssetManager({ onAssetAdd }: AssetManagerProps) {
         </div>
 
         {/* Assets Grid */}
-        {assets.length > 0 ? (
+        {assetItems.length > 0 ? (
           <div className="space-y-2">
-            <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Uploaded Assets</span>
+            <span className="text-[10px] uppercase font-bold text-zinc-400 tracking-wider">Project Assets</span>
             <div className="grid grid-cols-1 gap-2.5">
-              {assets.map((asset, idx) => {
-                const isImage = asset.type.startsWith("image/") || asset.name.endsWith(".svg")
+              {assetItems.map((asset) => {
+                const isImage = asset.type.startsWith("image") || asset.name.endsWith(".svg")
 
                 return (
                   <div
-                    key={idx}
+                    key={asset.path}
                     className="p-2.5 rounded-xl bg-[#18181b] border border-white/[0.08] hover:border-indigo-500/40 transition-all flex items-center gap-3 group"
                   >
                     {isImage ? (
@@ -141,16 +165,16 @@ export function AssetManager({ onAssetAdd }: AssetManagerProps) {
 
                     <div className="flex-1 min-w-0">
                       <p className="text-xs font-semibold text-white truncate">{asset.name}</p>
-                      <p className="text-[10px] text-zinc-500 font-mono">/assets/{asset.name} • {asset.size}</p>
+                      <p className="text-[10px] text-zinc-500 font-mono">{asset.path} • {asset.size}</p>
                     </div>
 
                     <div className="flex items-center gap-1">
                       <button
-                        onClick={() => copySnippet(asset.name, asset.type)}
+                        onClick={() => copySnippet(asset.path, asset.name)}
                         className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/[0.08] transition-colors"
                         title="Copy <img> snippet"
                       >
-                        {copiedPath === asset.name ? (
+                        {copiedPath === asset.path ? (
                           <Check className="h-3.5 w-3.5 text-emerald-400" />
                         ) : (
                           <Copy className="h-3.5 w-3.5" />
@@ -158,7 +182,10 @@ export function AssetManager({ onAssetAdd }: AssetManagerProps) {
                       </button>
 
                       <button
-                        onClick={() => removeAsset(idx)}
+                        onClick={() => {
+                          onAssetDelete(asset.path)
+                          toast.info(`Deleted ${asset.name}`)
+                        }}
                         className="p-1.5 rounded-lg text-zinc-500 hover:text-rose-400 hover:bg-rose-500/20 transition-colors"
                         title="Delete asset"
                       >
@@ -179,7 +206,7 @@ export function AssetManager({ onAssetAdd }: AssetManagerProps) {
             &lt;img src="/assets/logo.png" /&gt;
           </div>
           <div className="font-mono text-[11px] bg-black/40 p-2 rounded-lg text-indigo-300">
-            background: url('/assets/bg.jpg');
+            background: url('/assets/background.jpg');
           </div>
         </div>
       </div>
