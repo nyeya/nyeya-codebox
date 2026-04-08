@@ -13,7 +13,8 @@ import {
   AlertCircle,
   AlertTriangle,
   Info,
-  CheckCircle2
+  CheckCircle2,
+  CornerDownLeft
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { toast } from "sonner"
@@ -37,6 +38,8 @@ export function ConsolePanel({ messages, onClear, onEvalREPL }: ConsolePanelProp
   const [search, setSearch] = useState("")
   const [replInput, setReplInput] = useState("")
   const [copied, setCopied] = useState(false)
+  const [history, setHistory] = useState<string[]>([])
+  const [historyIndex, setHistoryIndex] = useState<number>(-1)
   const consoleEndRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -65,6 +68,8 @@ export function ConsolePanel({ messages, onClear, onEvalREPL }: ConsolePanelProp
     if (!replInput.trim()) return
 
     const expr = replInput.trim()
+    setHistory((prev) => [...prev, expr])
+    setHistoryIndex(-1)
     setReplInput("")
 
     // Send expression to iframe
@@ -75,6 +80,27 @@ export function ConsolePanel({ messages, onClear, onEvalREPL }: ConsolePanelProp
       iframes.forEach((iframe) => {
         iframe.contentWindow?.postMessage({ type: "eval-repl", expression: expr }, "*")
       })
+    }
+  }
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === "ArrowUp") {
+      e.preventDefault()
+      if (history.length === 0) return
+      const nextIndex = historyIndex === -1 ? history.length - 1 : Math.max(0, historyIndex - 1)
+      setHistoryIndex(nextIndex)
+      setReplInput(history[nextIndex] || "")
+    } else if (e.key === "ArrowDown") {
+      e.preventDefault()
+      if (historyIndex === -1) return
+      const nextIndex = historyIndex + 1
+      if (nextIndex >= history.length) {
+        setHistoryIndex(-1)
+        setReplInput("")
+      } else {
+        setHistoryIndex(nextIndex)
+        setReplInput(history[nextIndex] || "")
+      }
     }
   }
 
@@ -125,7 +151,7 @@ export function ConsolePanel({ messages, onClear, onEvalREPL }: ConsolePanelProp
               type="text"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              placeholder="Filter output..."
+              placeholder="Filter logs..."
               className="w-32 bg-[#18181b] border border-white/[0.08] rounded-md pl-6 pr-2 py-0.5 text-[11px] text-zinc-200 placeholder:text-zinc-500 focus:outline-none focus:border-indigo-500"
             />
           </div>
@@ -152,7 +178,7 @@ export function ConsolePanel({ messages, onClear, onEvalREPL }: ConsolePanelProp
       <div className="flex-1 overflow-y-auto font-mono text-xs p-2 space-y-1 select-text">
         {filteredMessages.length === 0 ? (
           <div className="flex items-center justify-center h-full text-zinc-600 text-xs">
-            <span>No console output. Logs from your preview will appear here.</span>
+            <span>No console output. Real-time preview logs and REPL outputs will appear here.</span>
           </div>
         ) : (
           filteredMessages.map((msg) => <ConsoleMessageItem key={msg.id} message={msg} />)
@@ -167,16 +193,17 @@ export function ConsolePanel({ messages, onClear, onEvalREPL }: ConsolePanelProp
           type="text"
           value={replInput}
           onChange={(e) => setReplInput(e.target.value)}
-          placeholder="Evaluate JavaScript expression in live sandbox..."
+          onKeyDown={handleKeyDown}
+          placeholder="Evaluate JavaScript (use ↑/↓ for command history)..."
           className="flex-1 bg-transparent border-none text-xs font-mono text-zinc-100 placeholder:text-zinc-600 focus:outline-none"
         />
         <button
           type="submit"
           disabled={!replInput.trim()}
           className="p-1 text-zinc-400 hover:text-indigo-400 disabled:opacity-30 transition-colors cursor-pointer"
-          title="Run in sandbox"
+          title="Run in sandbox (Enter)"
         >
-          <Send className="h-3.5 w-3.5" />
+          <CornerDownLeft className="h-3.5 w-3.5" />
         </button>
       </form>
     </div>
@@ -219,7 +246,7 @@ function ConsoleMessageItem({ message }: { message: ConsoleMessage }) {
       {icon}
 
       <div className="flex-1 min-w-0">
-        <div className={`break-words ${isExpanded ? "" : "line-clamp-2"}`}>
+        <div className={`break-words ${isExpanded ? "whitespace-pre-wrap" : "line-clamp-2"}`}>
           {message.message}
         </div>
 
