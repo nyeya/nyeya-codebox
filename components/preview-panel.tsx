@@ -58,19 +58,7 @@ export function PreviewPanel({ files, onConsoleLog, externalLibraries = [] }: Pr
       if (event.data && event.data.type === "console") {
         const { method, args } = event.data
         if (method && args && Array.isArray(args)) {
-          const message = args
-            .map((arg: any) => {
-              if (typeof arg === "object") {
-                try {
-                  return JSON.stringify(arg, null, 2)
-                } catch {
-                  return String(arg)
-                }
-              }
-              return String(arg)
-            })
-            .join(" ")
-
+          const message = args.join(" ")
           onConsoleLog(message, method as "log" | "error" | "warn" | "info")
         }
       }
@@ -105,7 +93,12 @@ export function PreviewPanel({ files, onConsoleLog, externalLibraries = [] }: Pr
         if (previousContent !== file.content) {
           let fileType: "html" | "css" | "js" = "html"
           if (file.path.endsWith(".css")) fileType = "css"
-          else if (file.path.endsWith(".js") || file.path.endsWith(".ts") || file.path.endsWith(".jsx") || file.path.endsWith(".tsx")) {
+          else if (
+            file.path.endsWith(".js") ||
+            file.path.endsWith(".ts") ||
+            file.path.endsWith(".jsx") ||
+            file.path.endsWith(".tsx")
+          ) {
             fileType = "js"
           }
 
@@ -139,9 +132,14 @@ export function PreviewPanel({ files, onConsoleLog, externalLibraries = [] }: Pr
   }, [files, externalLibraries])
 
   const hotReloadChanges = (changedFiles: { path: string; content: string; type: "html" | "css" | "js" }[]) => {
-    if (!iframeRef.current?.contentWindow) return
+    if (!iframeRef.current?.contentWindow) {
+      updatePreview(true)
+      return
+    }
 
     try {
+      let requiresFullReload = false
+
       changedFiles.forEach((file) => {
         const fileName = file.path.split("/").pop() || file.path
         let content = file.content
@@ -173,8 +171,14 @@ export function PreviewPanel({ files, onConsoleLog, externalLibraries = [] }: Pr
             },
             "*"
           )
+        } else {
+          requiresFullReload = true
         }
       })
+
+      if (requiresFullReload) {
+        updatePreview(true)
+      }
     } catch {
       updatePreview(true)
     }
@@ -444,20 +448,44 @@ function generateHTMLPreview(files: FileNode[], externalLibraries: Library[]): s
     }
   })
 
-  // Inject JS
-  const jsFiles = Array.from(fileMap.entries()).filter(([path]) => path.endsWith(".js") || path.endsWith(".ts"))
+  // Inject JS / TS / JSX
+  const jsFiles = Array.from(fileMap.entries()).filter(
+    ([path]) =>
+      path.endsWith(".js") ||
+      path.endsWith(".ts") ||
+      path.endsWith(".jsx") ||
+      path.endsWith(".tsx")
+  )
+
+  // Check if Babel transpilation is needed
+  const hasJSXorTS = jsFiles.some(
+    ([path, content]) =>
+      path.endsWith(".jsx") ||
+      path.endsWith(".tsx") ||
+      path.endsWith(".ts") ||
+      content.includes("</") ||
+      content.includes("React.")
+  )
+
+  if (hasJSXorTS && !htmlContent.includes("@babel/standalone") && !externalLibsHTML.includes("babel")) {
+    htmlContent = htmlContent.replace("</head>", `<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>\n</head>`)
+  }
+
   jsFiles.forEach(([path, content]) => {
     const fileName = path.split("/").pop() || ""
     if (!content.trim()) return
     const scriptRegex = new RegExp(`<script[^>]*src=["'](?:\\.?\\/)?${fileName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}["'][^>]*></script>`, "gi")
+    const isBabel = hasJSXorTS || path.endsWith(".jsx") || path.endsWith(".tsx") || path.endsWith(".ts")
+    const scriptTag = `<script data-file="${fileName}" ${isBabel ? 'type="text/babel"' : ""}>\n${content}\n</script>`
+
     if (htmlContent.match(scriptRegex)) {
-      htmlContent = htmlContent.replace(scriptRegex, `<script data-file="${fileName}">\n${content}\n</script>`)
+      htmlContent = htmlContent.replace(scriptRegex, scriptTag)
     } else {
-      htmlContent = htmlContent.replace("</body>", `<script data-file="${fileName}">\n${content}\n</script>\n</body>`)
+      htmlContent = htmlContent.replace("</body>", `${scriptTag}\n</body>`)
     }
   })
 
-  // Asset mapping script & Live console interceptor
+  // Asset mapping script & Live console interceptor & Hot Reload Bridge
   const bridgeScript = `
   <script>
     window.__ASSET_MAP__ = ${JSON.stringify(Object.fromEntries(assetMap))};
@@ -491,6 +519,33 @@ function generateHTMLPreview(files: FileNode[], externalLibraries: Library[]): s
       };
     })();
 
+    // Safe circular reference serializer for DevTools console
+    function safeSerialize(arg) {
+      if (arg === null) return "null";
+      if (arg === undefined) return "undefined";
+      if (typeof arg === "string") return arg;
+      if (typeof arg === "number" || typeof arg === "boolean") return String(arg);
+      if (arg instanceof Error) return arg.stack || arg.message;
+      if (arg instanceof Element) {
+        return '<' + arg.tagName.toLowerCase() + (arg.id ? ' id="' + arg.id + '"' : '') + (arg.className ? ' class="' + arg.className + '"' : '') + '>';
+      }
+      try {
+        const seen = new WeakSet();
+        return JSON.stringify(arg, function(key, value) {
+          if (typeof value === "object" && value !== null) {
+            if (seen.has(value)) return "[Circular]";
+            seen.add(value);
+            if (value instanceof Element) {
+              return '<' + value.tagName.toLowerCase() + '>';
+            }
+          }
+          return value;
+        }, 2);
+      } catch (err) {
+        return String(arg);
+      }
+    }
+
     // Live Hot Reload Listener & REPL Eval
     window.addEventListener('message', function(event) {
       if (!event.data) return;
@@ -511,15 +566,34 @@ function generateHTMLPreview(files: FileNode[], externalLibraries: Library[]): s
         try {
           const script = document.createElement('script');
           script.setAttribute('data-file', event.data.fileName);
+          if (event.data.fileName.endsWith('.jsx') || event.data.fileName.endsWith('.tsx') || event.data.fileName.endsWith('.ts')) {
+            script.setAttribute('type', 'text/babel');
+          }
           script.textContent = event.data.content;
           document.body.appendChild(script);
+          if (window.Babel && window.Babel.transformScriptTags) {
+            window.Babel.transformScriptTags();
+          }
         } catch (e) {
           console.error('[Live JS Error]:', e);
+        }
+      } else if (event.data.type === 'hot-reload-html') {
+        try {
+          const parser = new DOMParser();
+          const doc = parser.parseFromString(event.data.content, 'text/html');
+          if (doc.body) {
+            document.body.innerHTML = doc.body.innerHTML;
+          }
+          if (doc.title) {
+            document.title = doc.title;
+          }
+        } catch (e) {
+          window.location.reload();
         }
       } else if (event.data.type === 'eval-repl') {
         try {
           const result = window.eval(event.data.expression);
-          console.log('[REPL Result]:', result);
+          console.log('[REPL Output]:', result);
         } catch (err) {
           console.error('[REPL Error]:', err.message);
         }
@@ -534,7 +608,7 @@ function generateHTMLPreview(files: FileNode[], externalLibraries: Library[]): s
             window.parent.postMessage({
               type: 'console',
               method: method,
-              args: args.map(arg => typeof arg === 'object' ? JSON.stringify(arg) : String(arg))
+              args: args.map(safeSerialize)
             }, '*');
           }
         } catch (e) {}
@@ -550,8 +624,8 @@ function generateHTMLPreview(files: FileNode[], externalLibraries: Library[]): s
       console.warn = function(...args) { origWarn.apply(console, args); sendConsole('warn', args); };
       console.info = function(...args) { origInfo.apply(console, args); sendConsole('info', args); };
 
-      window.addEventListener('error', (e) => sendConsole('error', [e.message + ' (' + e.filename + ':' + e.lineno + ')']));
-      window.addEventListener('unhandledrejection', (e) => sendConsole('error', ['Unhandled Promise: ' + e.reason]));
+      window.addEventListener('error', (e) => sendConsole('error', [e.message + ' (' + (e.filename || 'preview') + ':' + e.lineno + ')']));
+      window.addEventListener('unhandledrejection', (e) => sendConsole('error', ['Unhandled Promise: ' + (e.reason ? (e.reason.message || e.reason) : 'Unknown reason')]));
     })();
   </script>
   `
