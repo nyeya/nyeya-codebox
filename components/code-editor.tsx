@@ -16,7 +16,7 @@ import {
   FileSpreadsheet
 } from "lucide-react"
 import { Button } from "@/components/ui/button"
-import Editor, { loader } from "@monaco-editor/react"
+import Editor, { loader, OnMount } from "@monaco-editor/react"
 import { toast } from "sonner"
 
 // Monaco Custom Theme Palettes
@@ -113,6 +113,8 @@ interface CodeEditorProps {
   onFileClose: (path: string) => void
   onNewFile?: () => void
   onFormat?: () => void
+  onSave?: () => void
+  onCursorChange?: (line: number, col: number) => void
   settings: {
     editorTheme: string
     fontSize: number
@@ -132,9 +134,12 @@ export function CodeEditor({
   onFileClose,
   onNewFile,
   onFormat,
+  onSave,
+  onCursorChange,
   settings,
 }: CodeEditorProps) {
   const currentFilePathRef = useRef<string>(path)
+  const editorRef = useRef<any>(null)
   const [copied, setCopied] = useState(false)
   const [localFontSize, setLocalFontSize] = useState(settings.fontSize)
   const [localWordWrap, setLocalWordWrap] = useState(settings.wordWrap)
@@ -152,13 +157,53 @@ export function CodeEditor({
     currentFilePathRef.current = path
   }, [path])
 
+  // Update editor value if changed externally (e.g. Prettier formatting or template switch)
+  useEffect(() => {
+    if (editorRef.current) {
+      const currentEditorValue = editorRef.current.getValue()
+      if (currentEditorValue !== value) {
+        editorRef.current.setValue(value || "")
+      }
+    }
+  }, [value, path])
+
+  // Dynamically update editor options without remounting
   useEffect(() => {
     setLocalFontSize(settings.fontSize)
-  }, [settings.fontSize])
+    if (editorRef.current) {
+      editorRef.current.updateOptions({
+        fontSize: settings.fontSize,
+        tabSize: settings.tabSize,
+      })
+    }
+  }, [settings.fontSize, settings.tabSize])
 
   useEffect(() => {
     setLocalWordWrap(settings.wordWrap)
+    if (editorRef.current) {
+      editorRef.current.updateOptions({
+        wordWrap: settings.wordWrap ? "on" : "off",
+      })
+    }
   }, [settings.wordWrap])
+
+  const handleEditorDidMount: OnMount = (editor, monaco) => {
+    editorRef.current = editor
+
+    // Register cursor position change listener
+    editor.onDidChangeCursorPosition((e) => {
+      onCursorChange?.(e.position.lineNumber, e.position.column)
+    })
+
+    // Register keyboard shortcuts inside editor
+    editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyCode.KeyS, () => {
+      onSave?.()
+    })
+
+    editor.addCommand(monaco.KeyMod.Shift | monaco.KeyMod.Alt | monaco.KeyCode.KeyF, () => {
+      onFormat?.()
+    })
+  }
 
   const handleEditorChange = (val: string | undefined) => {
     if (val !== undefined) {
@@ -206,7 +251,6 @@ export function CodeEditor({
     return path.startsWith("/assets/") || (value.startsWith("data:") && !isImageFile())
   }
 
-  // Active theme lookup
   const activeMonacoTheme = settings.editorTheme === "vs-dark" ? "obsidian-dark" : settings.editorTheme
 
   return (
@@ -280,7 +324,13 @@ export function CodeEditor({
           )}
 
           <button
-            onClick={() => setLocalWordWrap(!localWordWrap)}
+            onClick={() => {
+              const nextWrap = !localWordWrap
+              setLocalWordWrap(nextWrap)
+              if (editorRef.current) {
+                editorRef.current.updateOptions({ wordWrap: nextWrap ? "on" : "off" })
+              }
+            }}
             className={`p-1.5 rounded-lg transition-colors ${
               localWordWrap ? "text-indigo-400 bg-indigo-500/20" : "text-zinc-400 hover:text-white hover:bg-white/[0.08]"
             }`}
@@ -290,7 +340,13 @@ export function CodeEditor({
           </button>
 
           <button
-            onClick={() => setLocalFontSize(Math.min(24, localFontSize + 1))}
+            onClick={() => {
+              const nextSize = Math.min(24, localFontSize + 1)
+              setLocalFontSize(nextSize)
+              if (editorRef.current) {
+                editorRef.current.updateOptions({ fontSize: nextSize })
+              }
+            }}
             className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/[0.08] transition-colors"
             title="Increase Font Size"
           >
@@ -298,7 +354,13 @@ export function CodeEditor({
           </button>
 
           <button
-            onClick={() => setLocalFontSize(Math.max(10, localFontSize - 1))}
+            onClick={() => {
+              const nextSize = Math.max(10, localFontSize - 1)
+              setLocalFontSize(nextSize)
+              if (editorRef.current) {
+                editorRef.current.updateOptions({ fontSize: nextSize })
+              }
+            }}
             className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/[0.08] transition-colors"
             title="Decrease Font Size"
           >
@@ -333,7 +395,7 @@ export function CodeEditor({
                   navigator.clipboard.writeText(`<img src="${path}" alt="${getFileName(path)}" />`)
                   toast.success("Copied <img> tag to clipboard!")
                 }}
-                className="mt-4 px-4 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-all"
+                className="mt-4 px-4 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg transition-all cursor-pointer"
               >
                 Copy HTML &lt;img&gt; Tag
               </button>
@@ -356,12 +418,13 @@ export function CodeEditor({
         {/* Monaco Code Editor */}
         {!isBinaryAsset() && !isImageFile() && (
           <Editor
-            key={`${path}_${localFontSize}_${localWordWrap}_${activeMonacoTheme}`}
+            key={path}
             height="100%"
             language={language}
             defaultValue={value}
             theme={activeMonacoTheme}
             onChange={handleEditorChange}
+            onMount={handleEditorDidMount}
             options={{
               automaticLayout: true,
               fontSize: localFontSize,

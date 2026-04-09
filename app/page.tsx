@@ -199,6 +199,18 @@ export default function Home() {
         e.preventDefault()
         setActiveDrawer((prev) => (prev ? null : "explorer"))
       }
+
+      // Ctrl+` or Cmd+` -> Toggle Console
+      if ((e.ctrlKey || e.metaKey) && e.key === "`") {
+        e.preventDefault()
+        setShowConsole((prev) => !prev)
+      }
+
+      // Ctrl+Shift+E -> File Explorer
+      if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === "e") {
+        e.preventDefault()
+        setActiveDrawer("explorer")
+      }
     }
 
     window.addEventListener("keydown", handleKeyDown)
@@ -288,6 +300,10 @@ export default function Home() {
       if (result.files.length > 0) {
         loadFiles(result.files)
         setProjectName(result.name)
+        const html = result.files.find((f) => f.name.endsWith(".html"))
+        if (html) {
+          setActiveFile(html.path)
+        }
         toast.success(`Imported ${result.files.length} files from ${file.name}`)
         addMessage(`Project imported from ${file.name}`, "info")
       }
@@ -363,6 +379,52 @@ export default function Home() {
     })
   }
 
+  const handleFileDuplicate = (path: string) => {
+    const findNode = (nodes: FileNode[]): FileNode | null => {
+      for (const n of nodes) {
+        if (n.path === path) return n
+        if (n.children) {
+          const res = findNode(n.children)
+          if (res) return res
+        }
+      }
+      return null
+    }
+
+    const target = findNode(files)
+    if (!target) return
+
+    const parts = path.split("/").filter(Boolean)
+    const origName = parts[parts.length - 1]
+    const parentPath = "/" + parts.slice(0, -1).join("/")
+
+    const nameParts = origName.split(".")
+    let base = nameParts[0]
+    let ext = nameParts.length > 1 ? "." + nameParts.slice(1).join(".") : ""
+    let newName = `${base}-copy${ext}`
+
+    let counter = 2
+    const allPaths = new Set<string>()
+    const collectPaths = (nodes: FileNode[]) => {
+      nodes.forEach((n) => {
+        allPaths.add(n.path)
+        if (n.children) collectPaths(n.children)
+      })
+    }
+    collectPaths(files)
+
+    let testPath = parentPath === "/" ? `/${newName}` : `${parentPath}/${newName}`
+    while (allPaths.has(testPath)) {
+      newName = `${base}-copy-${counter}${ext}`
+      testPath = parentPath === "/" ? `/${newName}` : `${parentPath}/${newName}`
+      counter++
+    }
+
+    createFile(parentPath, newName, target.type, target.content)
+    setActiveFile(testPath)
+    addMessage(`Duplicated ${origName} -> ${newName}`, "info")
+  }
+
   const activeFileContent = getActiveFileContent()
   const activeFileLanguage = activeFile ? detectLanguage(activeFile) : "javascript"
   const errorCount = messages.filter((m) => m.type === "error").length
@@ -419,6 +481,7 @@ export default function Home() {
                       onFileCreate={createFile}
                       onFileDelete={removeFile}
                       onFileRename={renameFile}
+                      onFileDuplicate={handleFileDuplicate}
                     />
                   )}
                   {activeDrawer === "templates" && (
@@ -428,7 +491,7 @@ export default function Home() {
                       </span>
                       <button
                         onClick={() => setShowTemplateSelector(true)}
-                        className="w-full p-4 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-left hover:bg-indigo-600/30 transition-all text-xs font-semibold text-indigo-300"
+                        className="w-full p-4 rounded-xl bg-indigo-600/20 border border-indigo-500/30 text-left hover:bg-indigo-600/30 transition-all text-xs font-semibold text-indigo-300 cursor-pointer"
                       >
                         ⚡ Open Full Templates Gallery →
                       </button>
@@ -442,7 +505,11 @@ export default function Home() {
                     />
                   )}
                   {activeDrawer === "assets" && (
-                    <AssetManager onAssetAdd={handleAssetAdd} />
+                    <AssetManager
+                      files={files}
+                      onAssetAdd={handleAssetAdd}
+                      onAssetDelete={removeFile}
+                    />
                   )}
                   {activeDrawer === "snippets" && (
                     <SnippetsManager onInsertCode={handleInsertSnippet} />
@@ -474,6 +541,8 @@ export default function Home() {
                             onFileClose={closeFile}
                             onNewFile={() => createFile("/", "index.js", "file")}
                             onFormat={handleFormatCode}
+                            onSave={handleSave}
+                            onCursorChange={(line, col) => setLineCol({ line, col })}
                             settings={settings}
                           />
                         </Panel>
@@ -571,4 +640,3 @@ export default function Home() {
     </div>
   )
 }
-
